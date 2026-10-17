@@ -2,6 +2,9 @@
 
 # dependencies
 /node_modules
+/backend/node_modules
+/backend/dist
+/backend/src/generated/prisma
 /.pnp
 .pnp.*
 .yarn/*
@@ -30,8 +33,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# local env files; keep example templates tracked
 .env*
+!.env.example
 
 # vercel
 .vercel
