@@ -22,7 +22,8 @@ Editar ambos archivos antes de iniciar los servicios:
 
 - En `.env`, configurar `POSTGRES_DB`, `POSTGRES_USER` y `POSTGRES_PASSWORD`. Estos valores se usan para inicializar PostgreSQL en Docker Compose.
 - En `backend/.env`, configurar `DATABASE_URL` con los mismos datos de usuario, contraseña y base de datos, además del host `localhost` y puerto `5432`. Si la contraseña contiene caracteres especiales, codificarlos como URL.
-- `JWT_SECRET`, `JWT_EXPIRES_IN`, `INITIAL_ADMIN_EMAIL` e `INITIAL_ADMIN_PASSWORD` quedan reservados para una etapa posterior; todavía no se utilizan.
+- `INITIAL_ADMIN_EMAIL` e `INITIAL_ADMIN_PASSWORD` se configuran localmente en `backend/.env` para crear el administrador inicial. El seed guarda únicamente un hash scrypt con sal aleatoria; no agregues credenciales reales a Git.
+- Para la autenticación, genera y configura `JWT_SECRET` con al menos 32 bytes aleatorios y `JWT_EXPIRES_IN` con una duración como `8h`. Por ejemplo, desde `backend/`, ejecuta `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"` y copia la salida solo en el `.env` local. No reutilices el valor de ejemplo ni publiques el secreto. La API autentica mediante cookie `httpOnly`, `sameSite=lax`, segura en producción; CORS admite el origen indicado por `FRONTEND_ORIGIN` con credenciales.
 - `NEXT_PUBLIC_API_URL` configura el origen de la API del frontend.
 
 Los archivos `.env` locales están excluidos de Git. Los `.env.example` contienen únicamente valores de ejemplo y nunca deben reemplazarse por credenciales reales dentro del repositorio.
@@ -58,7 +59,13 @@ npm run build
 npm run start:dev
 ```
 
-NestJS escucha en `http://localhost:4000/api`. El esqueleto verifica `/api` y establece la conexión a PostgreSQL al iniciar. Antes de arrancarlo, iniciar la base de datos y configurar `backend/.env`.
+NestJS escucha en `http://localhost:4000/api`. Antes de arrancarlo, iniciar la base de datos y configurar `backend/.env`.
+
+Endpoints de autenticación:
+
+- `POST /api/auth/login`: inicia sesión y establece la cookie de autenticación.
+- `POST /api/auth/logout`: elimina la cookie.
+- `GET /api/auth/me`: devuelve el administrador de la sesión actual; requiere la cookie.
 
 Para validar el esquema Prisma:
 
@@ -67,7 +74,14 @@ Set-Location backend
 npm run prisma:validate
 ```
 
-En esta etapa están preparados los modelos y la conexión; la primera migración se generará en una etapa posterior.
+Para crear el usuario administrador inicial, asegurate de que PostgreSQL esté iniciado y que `backend/.env` tenga configuradas las variables anteriores y `DATABASE_URL`. Desde `backend/`, ejecutá:
+
+```powershell
+npm run prisma:generate
+npm run prisma:seed
+```
+
+El seed usa `upsert` por email: repetirlo no crea otro usuario ni cambia la contraseña de uno que ya existe.
 
 ## Instalar e iniciar el frontend
 
