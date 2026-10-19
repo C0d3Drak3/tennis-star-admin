@@ -7,5 +7,6 @@ import { AuthTokenService } from "./auth-token.service";
 @Module({
   controllers: [AuthController],
   providers: [AuthGuard, AuthService, AuthTokenService],
+  exports: [AuthGuard, AuthTokenService],
 })
 export class AuthModule {}
