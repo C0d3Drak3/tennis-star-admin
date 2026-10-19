@@ -79,15 +79,31 @@ export class ProductsService {
           brand: { select: { id: true, name: true } },
           category: { select: { id: true, name: true } },
           subcategory: { select: { id: true, name: true } },
-          _count: { select: { saleItems: true } },
+          _count: {
+            select: { saleItems: true },
+          },
         },
       }),
     ]);
+    const activeSaleItems = items.length
+      ? await this.prisma.saleItem.groupBy({
+          by: ["productId"],
+          where: {
+            productId: { in: items.map((product) => product.id) },
+            sale: { status: "PREPARING", stockDeducted: true },
+          },
+          _count: { _all: true },
+        })
+      : [];
+    const activeCountByProduct = new Map(
+      activeSaleItems.map((entry) => [entry.productId, entry._count._all]),
+    );
 
     return {
       items: items.map(({ _count, ...product }) => ({
         ...product,
         saleItemCount: _count.saleItems,
+        activeSaleItemCount: activeCountByProduct.get(product.id) ?? 0,
       })),
       total,
       page: filters.page,
@@ -174,32 +190,36 @@ export class ProductsService {
   }
 
   async remove(id: string) {
-    const product = await this.prisma.product.findUnique({
-      where: { id },
-      select: {
-        id: true,
-        imageUrl: true,
-        _count: { select: { saleItems: true } },
-      },
-    });
-    if (!product) {
-      throw new NotFoundException("No se encontró el producto.");
-    }
-    if (product._count.saleItems > 0) {
-      throw new ConflictException(
-        "No se puede eliminar físicamente este producto porque está asociado a ventas. Desactívalo para retirarlo del catálogo.",
-      );
-    }
-
     try {
-      await this.prisma.product.delete({ where: { id } });
-      await this.imageStorage.removeIfUnreferenced(product.imageUrl);
+      const imageUrl = await this.prisma.$transaction(async (tx) => {
+        const locked = await tx.$queryRaw<{ id: string; imageUrl: string }[]>`
+          SELECT "id", "imageUrl" FROM "Product" WHERE "id" = ${id} FOR UPDATE
+        `;
+        if (locked.length === 0) {
+          throw new NotFoundException("No se encontró el producto.");
+        }
+        const activeSale = await tx.saleItem.findFirst({
+          where: {
+            productId: id,
+            sale: { status: "PREPARING", stockDeducted: true },
+          },
+          select: { id: true },
+        });
+        if (activeSale) {
+          throw new ConflictException(
+            "No se puede eliminar este producto porque una orden En preparación todavía depende de su inventario.",
+          );
+        }
+        await tx.product.delete({ where: { id } });
+        return locked[0].imageUrl;
+      });
+      await this.imageStorage.removeIfUnreferenced(imageUrl);
       return { success: true };
     } catch (error) {
       const code = prismaErrorCode(error);
       if (code === "P2003") {
         throw new ConflictException(
-          "No se puede eliminar físicamente este producto porque está asociado a ventas. Desactívalo para retirarlo del catálogo.",
+          "No se puede eliminar este producto porque tiene registros relacionados.",
         );
       }
       if (code === "P2025") {

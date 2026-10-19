@@ -11,8 +11,42 @@ model User {
   id           String   @id @default(cuid())
   email        String   @unique
   passwordHash String
+  saleHistory  SaleHistory[]
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+enum OrderStatus {
+  PREPARING
+  SHIPPED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PAID
+  FAILED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+}
+
+model Customer {
+  id              String   @id @default(cuid())
+  firstName       String
+  lastName        String
+  email           String   @unique
+  phone           String
+  shippingAddress String
+  city            String
+  postalCode      String
+  sales           Sale[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([lastName, firstName])
+  @@index([city])
 }
 
 model Category {
@@ -63,22 +97,68 @@ model Product {
 }
 
 model Sale {
-  id        String     @id @default(cuid())
-  total     Decimal    @db.Decimal(12, 2)
-  items     SaleItem[]
-  createdAt DateTime   @default(now())
+  id                   String        @id @default(cuid())
+  orderNumber          String        @unique
+  idempotencyKey       String?       @unique
+  customerId           String?
+  customerIdSnapshot   String?
+  customerFirstName    String?
+  customerLastName     String?
+  customerEmail        String?
+  customerPhone        String?
+  shippingAddress      String?
+  shippingCity         String?
+  shippingPostalCode   String?
+  carrier              String?
+  trackingNumber       String?
+  operationalNotes     String?
+  paymentMethod        PaymentMethod?
+  paymentStatus        PaymentStatus @default(FAILED)
+  status               OrderStatus   @default(CANCELLED)
+  stockDeducted        Boolean       @default(false)
+  total                Decimal       @db.Decimal(12, 2)
+  customer             Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  items                SaleItem[]
+  history              SaleHistory[]
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  @@index([status, createdAt])
+  @@index([paymentStatus])
 }
 
 model SaleItem {
-  id          String  @id @default(cuid())
-  saleId      String
-  productId   String
-  productName String
-  quantity    Int
-  unitPrice   Decimal @db.Decimal(12, 2)
-  sale        Sale    @relation(fields: [saleId], references: [id], onDelete: Restrict)
-  product     Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  id                 String   @id @default(cuid())
+  saleId             String
+  productId          String?
+  productIdSnapshot  String?
+  productName        String
+  productDescription String?
+  brandName          String?
+  categoryName       String?
+  subcategoryName    String?
+  quantity           Int
+  unitPrice          Decimal  @db.Decimal(12, 2)
+  subtotal           Decimal  @db.Decimal(12, 2)
+  sale               Sale     @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  product            Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   @@index([saleId])
   @@index([productId])
+  @@index([productIdSnapshot])
+}
+
+model SaleHistory {
+  id          String   @id @default(cuid())
+  saleId      String
+  actorUserId String?
+  actorEmail  String
+  event       String
+  changes     Json
+  note        String?
+  sale        Sale     @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  actor       User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  @@index([saleId, createdAt])
 }

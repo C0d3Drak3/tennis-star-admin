@@ -1002,9 +1002,9 @@ export function Products() {
                                   ? "Desactivar"
                                   : "Activar"}
                             </Button>
-                            {product.saleItemCount ? (
+                            {product.activeSaleItemCount ? (
                               <span className="text-xs text-muted-foreground">
-                                Venta relacionada; usa desactivación
+                                Orden en preparación; usa desactivación
                               </span>
                             ) : (
                               <Button

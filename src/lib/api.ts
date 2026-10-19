@@ -165,6 +165,254 @@ export function deleteCategory(id: string): Promise<{ success: boolean }> {
   );
 }
 
+export interface Customer {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  shippingAddress: string;
+  city: string;
+  postalCode: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CustomerInput = Omit<
+  Customer,
+  "id" | "createdAt" | "updatedAt"
+>;
+
+export interface CustomerList {
+  items: Customer[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export interface CustomerFilters {
+  search?: string;
+  page?: number;
+  pageSize?: number;
+  sortBy?: "firstName" | "lastName" | "email" | "city" | "createdAt";
+  sortDirection?: "asc" | "desc";
+}
+
+export function getCustomers(
+  filters: CustomerFilters = {},
+): Promise<CustomerList> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== "") {
+      query.set(key, String(value));
+    }
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  return request<CustomerList>(`/customers${suffix}`);
+}
+
+export function getCustomer(id: string): Promise<Customer> {
+  return request<Customer>(`/customers/${encodeURIComponent(id)}`);
+}
+
+export function createCustomer(input: CustomerInput): Promise<Customer> {
+  return request<Customer>("/customers", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateCustomer(
+  id: string,
+  input: Partial<CustomerInput>,
+): Promise<Customer> {
+  return request<Customer>(`/customers/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteCustomer(id: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(
+    `/customers/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
+}
+
+export type SaleOrderStatus = "PREPARING" | "SHIPPED" | "CANCELLED";
+export type SalePaymentStatus = "PAID" | "FAILED";
+export type SalePaymentMethod = "CASH" | "CARD";
+
+export interface SaleItem {
+  id: string;
+  productId: string | null;
+  productIdSnapshot: string | null;
+  productName: string;
+  productDescription: string | null;
+  brandName: string | null;
+  categoryName: string | null;
+  subcategoryName: string | null;
+  quantity: number;
+  unitPrice: string;
+  subtotal: string;
+}
+
+export interface SaleHistoryEntry {
+  id: string;
+  actorEmail: string;
+  event: string;
+  changes: Record<string, unknown>;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface Sale {
+  id: string;
+  orderNumber: string;
+  customerId: string | null;
+  customerIdSnapshot: string | null;
+  customerFirstName: string | null;
+  customerLastName: string | null;
+  customerEmail: string | null;
+  customerPhone: string | null;
+  shippingAddress: string | null;
+  shippingCity: string | null;
+  shippingPostalCode: string | null;
+  carrier: string | null;
+  trackingNumber: string | null;
+  operationalNotes: string | null;
+  paymentMethod: SalePaymentMethod | null;
+  paymentStatus: SalePaymentStatus;
+  status: SaleOrderStatus;
+  stockDeducted: boolean;
+  total: string;
+  items: SaleItem[];
+  history?: SaleHistoryEntry[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaleInput {
+  customerId: string | null;
+  customerName?: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  paymentMethod: SalePaymentMethod;
+  paymentStatus: SalePaymentStatus;
+  shippingAddress: string;
+  shippingCity: string;
+  shippingPostalCode: string;
+  carrier: string | null;
+  trackingNumber: string | null;
+  operationalNotes: string | null;
+  items: { productId: string; quantity: number; unitPrice?: string }[];
+}
+
+export interface SaleList {
+  items: Sale[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export interface SaleFilters {
+  search?: string;
+  status?: SaleOrderStatus | "";
+  paymentStatus?: SalePaymentStatus | "";
+  page?: number;
+  pageSize?: number;
+  sortBy?: "customer" | "orderNumber" | "status" | "total" | "payment" | "createdAt";
+  sortDirection?: "asc" | "desc";
+}
+
+function queryString(filters: object): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== "") query.set(key, String(value));
+  }
+  return query.size ? `?${query.toString()}` : "";
+}
+
+export function getSales(filters: SaleFilters = {}): Promise<SaleList> {
+  return request<SaleList>(`/sales${queryString(filters)}`);
+}
+
+export function getSale(id: string): Promise<Sale> {
+  return request<Sale>(`/sales/${encodeURIComponent(id)}`);
+}
+
+export function createSale(input: SaleInput, idempotencyKey: string): Promise<Sale> {
+  return request<Sale>("/sales", {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateSale(id: string, input: SaleInput): Promise<Sale> {
+  return request<Sale>(`/sales/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export function reactivateSale(id: string, input: SaleInput): Promise<Sale> {
+  return request<Sale>(`/sales/${encodeURIComponent(id)}/reactivate`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function cancelSale(id: string, note?: string): Promise<Sale> {
+  return request<Sale>(`/sales/${encodeURIComponent(id)}/cancel`, {
+    method: "POST",
+    body: JSON.stringify({ note }),
+  });
+}
+
+export function updateSalePayment(
+  id: string,
+  paymentStatus: SalePaymentStatus,
+  note?: string,
+): Promise<Sale> {
+  return request<Sale>(`/sales/${encodeURIComponent(id)}/payment`, {
+    method: "PATCH",
+    body: JSON.stringify({ paymentStatus, note }),
+  });
+}
+
+export function completeSale(
+  id: string,
+  input: {
+    carrier: string | null;
+    trackingNumber: string | null;
+    operationalNotes: string | null;
+    note: string | null;
+  },
+): Promise<Sale> {
+  return request<Sale>(`/sales/${encodeURIComponent(id)}/complete`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateSaleOperations(
+  id: string,
+  input: {
+    carrier: string | null;
+    trackingNumber: string | null;
+    operationalNotes: string | null;
+    note: string | null;
+  },
+): Promise<Sale> {
+  return request<Sale>(`/sales/${encodeURIComponent(id)}/operations`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -180,6 +428,7 @@ export interface Product {
   subcategory: Pick<Category, "id" | "name"> | null;
   stock: number;
   saleItemCount?: number;
+  activeSaleItemCount?: number;
   createdAt: string;
   updatedAt: string;
 }

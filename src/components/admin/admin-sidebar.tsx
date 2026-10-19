@@ -55,7 +55,11 @@ export function AdminSidebar({
                     ? "/brands"
                   : label === "Productos"
                     ? "/products"
-                  : null;
+                  : label === "Clientes"
+                    ? "/customers"
+                    : label === "Ventas"
+                      ? "/sales"
+                    : null;
 
             return (
               <li
