@@ -7,18 +7,35 @@ import {
   Param,
   Patch,
   Post,
+  Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import { AuthGuard } from "../auth/auth.guard";
+import {
+  isUploadedProductImage,
+  type UploadedProductImage,
+} from "./image-storage.service";
 import { ProductsService } from "./products.service";
 import type {
   CreateProductInput,
   ProductInput,
+  ProductListFilters,
+  ProductSortColumn,
+  SortDirection,
 } from "./products.types";
 
 const MAX_PRODUCT_NAME_LENGTH = 200;
 const MAX_DESCRIPTION_LENGTH = 2_000;
 const PRICE_PATTERN = /^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/;
+const SUPPORTED_IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+]);
 
 function validateProductBody(body: unknown, partial: false): CreateProductInput;
 function validateProductBody(body: unknown, partial: true): ProductInput;
@@ -35,19 +52,29 @@ function validateProductBody(
     "name",
     "price",
     "description",
+    "brandId",
     "categoryId",
+    "subcategoryId",
+    "stock",
     "isActive",
   ]);
   if (Object.keys(candidate).some((key) => !allowedFields.has(key))) {
     throw new BadRequestException("Los datos del producto no son válidos.");
   }
-  if (!partial && (!("name" in candidate) || !("price" in candidate) || !("categoryId" in candidate))) {
+  if (
+    !partial &&
+    ["name", "price", "brandId", "categoryId", "stock"].some(
+      (key) => !(key in candidate),
+    )
+  ) {
     throw new BadRequestException(
-      "El nombre, precio y categoría son obligatorios.",
+      "Nombre, precio, marca, categoría principal y stock son obligatorios.",
     );
   }
   if (partial && Object.keys(candidate).length === 0) {
-    throw new BadRequestException("Debes indicar al menos un dato para actualizar.");
+    throw new BadRequestException(
+      "Debes indicar al menos un dato para actualizar.",
+    );
   }
 
   const input: ProductInput = {};
@@ -72,7 +99,7 @@ function validateProductBody(
       BigInt(whole || "0") * 100n + BigInt(fraction.padEnd(2, "0")) <= 0n
     ) {
       throw new BadRequestException(
-        "El precio debe ser un número positivo con hasta dos decimales.",
+        "El precio debe ser positivo y tener hasta dos decimales.",
       );
     }
     input.price = price;
@@ -92,42 +119,178 @@ function validateProductBody(
         ? candidate.description.trim() || null
         : null;
   }
-  if ("categoryId" in candidate) {
-    if (
-      typeof candidate.categoryId !== "string" ||
-      candidate.categoryId.trim().length === 0
-    ) {
-      throw new BadRequestException("Debes seleccionar una categoría válida.");
+  for (const key of ["brandId", "categoryId"] as const) {
+    if (key in candidate) {
+      if (
+        typeof candidate[key] !== "string" ||
+        candidate[key].trim().length === 0
+      ) {
+        throw new BadRequestException(
+          key === "brandId"
+            ? "Debes seleccionar una marca válida."
+            : "Debes seleccionar una categoría principal válida.",
+        );
+      }
+      input[key] = candidate[key].trim();
     }
-    input.categoryId = candidate.categoryId.trim();
+  }
+  if ("subcategoryId" in candidate) {
+    if (
+      candidate.subcategoryId !== null &&
+      (typeof candidate.subcategoryId !== "string" ||
+        (candidate.subcategoryId.trim().length === 0 &&
+          candidate.subcategoryId !== ""))
+    ) {
+      throw new BadRequestException("La subcategoría no es válida.");
+    }
+    input.subcategoryId =
+      typeof candidate.subcategoryId === "string" &&
+      candidate.subcategoryId.trim().length > 0
+        ? candidate.subcategoryId.trim()
+        : null;
+  }
+  if ("stock" in candidate) {
+    const stock =
+      typeof candidate.stock === "number"
+        ? candidate.stock
+        : typeof candidate.stock === "string" &&
+            /^\d+$/.test(candidate.stock.trim())
+          ? Number(candidate.stock)
+          : Number.NaN;
+    if (
+      !Number.isSafeInteger(stock) ||
+      stock < 0 ||
+      stock > 2_147_483_647
+    ) {
+      throw new BadRequestException(
+        "El stock debe ser un número entero no negativo.",
+      );
+    }
+    input.stock = stock;
   }
   if ("isActive" in candidate) {
-    if (typeof candidate.isActive !== "boolean") {
+    const isActive =
+      candidate.isActive === "true"
+        ? true
+        : candidate.isActive === "false"
+          ? false
+          : candidate.isActive;
+    if (typeof isActive !== "boolean") {
       throw new BadRequestException("El estado del producto no es válido.");
     }
-    input.isActive = candidate.isActive;
+    input.isActive = isActive;
   }
 
   if (!partial) {
     if (
       typeof input.name !== "string" ||
       typeof input.price !== "string" ||
-      typeof input.categoryId !== "string"
+      typeof input.brandId !== "string" ||
+      typeof input.categoryId !== "string" ||
+      typeof input.stock !== "number"
     ) {
       throw new BadRequestException(
-        "El nombre, precio y categoría son obligatorios.",
+        "Nombre, precio, marca, categoría principal y stock son obligatorios.",
       );
     }
     return {
       ...input,
       name: input.name,
       price: input.price,
+      brandId: input.brandId,
       categoryId: input.categoryId,
+      stock: input.stock,
     };
   }
-
   return input;
 }
+
+function parseListFilters(query: Record<string, unknown>): ProductListFilters {
+  const page = query.page === undefined ? 1 : Number(query.page);
+  const pageSize = query.pageSize === undefined ? 10 : Number(query.pageSize);
+  if (
+    !Number.isSafeInteger(page) ||
+    page < 1 ||
+    !Number.isSafeInteger(pageSize) ||
+    pageSize < 1 ||
+    pageSize > 100
+  ) {
+    throw new BadRequestException("La página o el tamaño de página no son válidos.");
+  }
+
+  let isActive: boolean | undefined;
+  if (query.isActive !== undefined && query.isActive !== "") {
+    if (query.isActive === "true") {
+      isActive = true;
+    } else if (query.isActive === "false") {
+      isActive = false;
+    } else {
+      throw new BadRequestException("El filtro de estado no es válido.");
+    }
+  }
+
+  const sortColumns: ProductSortColumn[] = [
+    "category",
+    "brand",
+    "stock",
+    "price",
+    "status",
+    "name",
+  ];
+  const isSortColumn = (value: unknown): value is ProductSortColumn =>
+    typeof value === "string" && sortColumns.some((column) => column === value);
+  const sortBy: ProductSortColumn | null =
+    query.sortBy === undefined
+      ? "name"
+      : isSortColumn(query.sortBy)
+        ? query.sortBy
+        : null;
+  const isSortDirection = (value: unknown): value is SortDirection =>
+    value === "asc" || value === "desc";
+  const sortDirection =
+    query.sortDirection === undefined
+      ? "asc"
+      : isSortDirection(query.sortDirection)
+        ? query.sortDirection
+        : null;
+  if (sortBy === null || sortDirection === null) {
+    throw new BadRequestException("El ordenamiento solicitado no es válido.");
+  }
+
+  return {
+    search: typeof query.search === "string" ? query.search.trim() : undefined,
+    categoryId:
+      typeof query.categoryId === "string" ? query.categoryId : undefined,
+    brandId: typeof query.brandId === "string" ? query.brandId : undefined,
+    isActive,
+    page,
+    pageSize,
+    sortBy,
+    sortDirection,
+  };
+}
+
+function imageFileFilter(
+  _request: unknown,
+  file: { mimetype: string },
+  callback: (error: Error | null, acceptFile: boolean) => void,
+) {
+  if (!SUPPORTED_IMAGE_TYPES.has(file.mimetype)) {
+    callback(
+      new BadRequestException(
+        "Formato de imagen no admitido. Usa JPEG, PNG, GIF o WebP.",
+      ),
+      false,
+    );
+    return;
+  }
+  callback(null, true);
+}
+
+const productImageInterceptor = FileInterceptor("image", {
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  fileFilter: imageFileFilter,
+});
 
 @Controller("products")
 @UseGuards(AuthGuard)
@@ -135,18 +298,34 @@ export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
   @Get()
-  list() {
-    return this.productsService.list();
+  list(@Query() query: Record<string, unknown>) {
+    return this.productsService.list(parseListFilters(query));
   }
 
   @Post()
-  create(@Body() body: unknown) {
-    return this.productsService.create(validateProductBody(body, false));
+  @UseInterceptors(productImageInterceptor)
+  create(@Body() body: unknown, @UploadedFile() file: unknown) {
+    if (!isUploadedProductImage(file)) {
+      throw new BadRequestException("Debes cargar una imagen para el producto.");
+    }
+    return this.productsService.create(
+      validateProductBody(body, false),
+      file as UploadedProductImage,
+    );
   }
 
   @Patch(":id")
-  update(@Param("id") id: string, @Body() body: unknown) {
-    return this.productsService.update(id, validateProductBody(body, true));
+  @UseInterceptors(productImageInterceptor)
+  update(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @UploadedFile() file: unknown,
+  ) {
+    return this.productsService.update(
+      id,
+      validateProductBody(body, true),
+      isUploadedProductImage(file) ? file : undefined,
+    );
   }
 
   @Delete(":id")

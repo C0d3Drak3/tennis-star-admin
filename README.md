@@ -74,6 +74,30 @@ Set-Location backend
 npm run prisma:validate
 ```
 
+## Migraciones y catálogo
+
+Las migraciones versionadas están en `backend/prisma/migrations/`. Después de
+revisar y respaldar la base existente, aplicar las migraciones pendientes desde
+`backend/` con:
+
+```powershell
+npm run prisma:migrate:deploy
+```
+
+La migración del catálogo agrega jerarquía de categorías de dos niveles,
+marcas y los campos requeridos de productos. No recrea la base de datos ni
+modifica las tablas de ventas.
+
+Las imágenes de productos se guardan fuera de PostgreSQL en
+`backend/uploads/products/` por defecto. `PRODUCT_IMAGE_DIR` permite cambiar
+la carpeta local; una ruta relativa se resuelve desde el directorio actual al
+iniciar el backend. Se aceptan JPEG, PNG, GIF y WebP de hasta 5 MB. Los nombres
+se generan en el servidor y PostgreSQL conserva la ruta relativa. Este
+almacenamiento local es apropiado para desarrollo, pero no se comparte entre
+varias instancias del backend y no sustituye un respaldo de archivos; para
+producción con varias instancias se recomienda migrar el adaptador de
+almacenamiento a un proveedor de objetos.
+
 Para crear el usuario administrador inicial, asegurate de que PostgreSQL esté iniciado y que `backend/.env` tenga configuradas las variables anteriores y `DATABASE_URL`. Desde `backend/`, ejecutá:
 
 ```powershell

@@ -1,12 +1,19 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { Prisma } from "../generated/prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import {
+  ImageStorageService,
+  type UploadedProductImage,
+} from "./image-storage.service";
 import type {
   CreateProductInput,
   ProductInput,
+  ProductListFilters,
 } from "./products.types";
 
 function prismaErrorCode(error: unknown): string | null {
@@ -18,62 +25,151 @@ function prismaErrorCode(error: unknown): string | null {
 
 @Injectable()
 export class ProductsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly imageStorage: ImageStorageService,
+  ) {}
 
-  list() {
-    return this.prisma.product.findMany({
-      orderBy: { name: "asc" },
-      include: {
-        category: { select: { id: true, name: true } },
-        _count: { select: { saleItems: true } },
-      },
-    }).then((products) =>
-      products.map(({ _count, ...product }) => ({
+  async list(filters: ProductListFilters) {
+    const direction = filters.sortDirection;
+    const orderBy: Prisma.ProductOrderByWithRelationInput[] =
+      filters.sortBy === "category"
+        ? [{ category: { name: direction } }, { name: "asc" }, { id: "asc" }]
+        : filters.sortBy === "brand"
+          ? [{ brand: { name: direction } }, { name: "asc" }, { id: "asc" }]
+          : filters.sortBy === "stock"
+            ? [{ stock: direction }, { name: "asc" }, { id: "asc" }]
+            : filters.sortBy === "price"
+              ? [{ price: direction }, { name: "asc" }, { id: "asc" }]
+              : filters.sortBy === "status"
+                ? [
+                    { isActive: direction },
+                    { name: "asc" },
+                    { id: "asc" },
+                  ]
+                : [{ name: direction }, { id: "asc" }];
+    const where: Prisma.ProductWhereInput = {
+      ...(filters.search
+        ? {
+            OR: [
+              { name: { contains: filters.search, mode: "insensitive" } },
+              {
+                description: {
+                  contains: filters.search,
+                  mode: "insensitive",
+                },
+              },
+            ],
+          }
+        : {}),
+      ...(filters.categoryId ? { categoryId: filters.categoryId } : {}),
+      ...(filters.brandId ? { brandId: filters.brandId } : {}),
+      ...(filters.isActive === undefined
+        ? {}
+        : { isActive: filters.isActive }),
+    };
+    const [total, items] = await Promise.all([
+      this.prisma.product.count({ where }),
+      this.prisma.product.findMany({
+        where,
+        orderBy,
+        skip: (filters.page - 1) * filters.pageSize,
+        take: filters.pageSize,
+        include: {
+          brand: { select: { id: true, name: true } },
+          category: { select: { id: true, name: true } },
+          subcategory: { select: { id: true, name: true } },
+          _count: { select: { saleItems: true } },
+        },
+      }),
+    ]);
+
+    return {
+      items: items.map(({ _count, ...product }) => ({
         ...product,
         saleItemCount: _count.saleItems,
       })),
-    );
+      total,
+      page: filters.page,
+      pageSize: filters.pageSize,
+      totalPages: Math.ceil(total / filters.pageSize),
+    };
   }
 
-  async create(input: CreateProductInput) {
-    await this.ensureCategoryExists(input.categoryId);
+  async create(input: CreateProductInput, image: UploadedProductImage) {
+    await this.ensureReferences(input);
+    const imageUrl = await this.imageStorage.save(image);
     try {
       return await this.prisma.product.create({
         data: {
           name: input.name,
           price: input.price,
           categoryId: input.categoryId,
+          subcategoryId: input.subcategoryId ?? null,
+          brandId: input.brandId,
+          stock: input.stock,
           description: input.description ?? null,
+          imageUrl,
         },
-        include: { category: { select: { id: true, name: true } } },
+        include: {
+          brand: { select: { id: true, name: true } },
+          category: { select: { id: true, name: true } },
+          subcategory: { select: { id: true, name: true } },
+        },
       });
     } catch (error) {
-      if (prismaErrorCode(error) === "P2003") {
-        throw new NotFoundException("No se encontró la categoría seleccionada.");
-      }
-      throw error;
+      await this.imageStorage.removeIfUnreferenced(imageUrl);
+      this.rethrowReferenceError(error);
     }
   }
 
-  async update(id: string, input: ProductInput) {
-    if (input.categoryId) {
-      await this.ensureCategoryExists(input.categoryId);
+  async update(
+    id: string,
+    input: ProductInput,
+    image?: UploadedProductImage,
+  ) {
+    const current = await this.prisma.product.findUnique({
+      where: { id },
+      select: {
+        imageUrl: true,
+        brandId: true,
+        categoryId: true,
+        subcategoryId: true,
+      },
+    });
+    if (!current) {
+      throw new NotFoundException("No se encontró el producto.");
     }
+    await this.ensureReferences({
+      brandId: input.brandId ?? current.brandId,
+      categoryId: input.categoryId ?? current.categoryId,
+      subcategoryId: Object.hasOwn(input, "subcategoryId")
+        ? input.subcategoryId
+        : current.subcategoryId,
+    });
+    const nextImageUrl = image ? await this.imageStorage.save(image) : undefined;
     try {
-      return await this.prisma.product.update({
+      const updated = await this.prisma.product.update({
         where: { id },
-        data: input,
-        include: { category: { select: { id: true, name: true } } },
+        data: {
+          ...input,
+          ...(nextImageUrl ? { imageUrl: nextImageUrl } : {}),
+        },
+        include: {
+          brand: { select: { id: true, name: true } },
+          category: { select: { id: true, name: true } },
+          subcategory: { select: { id: true, name: true } },
+        },
       });
+      if (nextImageUrl && nextImageUrl !== current.imageUrl) {
+        await this.imageStorage.removeIfUnreferenced(current.imageUrl);
+      }
+      return updated;
     } catch (error) {
-      const code = prismaErrorCode(error);
-      if (code === "P2025") {
-        throw new NotFoundException("No se encontró el producto.");
+      if (nextImageUrl) {
+        await this.imageStorage.removeIfUnreferenced(nextImageUrl);
       }
-      if (code === "P2003") {
-        throw new NotFoundException("No se encontró la categoría seleccionada.");
-      }
-      throw error;
+      this.rethrowReferenceError(error);
     }
   }
 
@@ -82,6 +178,7 @@ export class ProductsService {
       where: { id },
       select: {
         id: true,
+        imageUrl: true,
         _count: { select: { saleItems: true } },
       },
     });
@@ -96,6 +193,7 @@ export class ProductsService {
 
     try {
       await this.prisma.product.delete({ where: { id } });
+      await this.imageStorage.removeIfUnreferenced(product.imageUrl);
       return { success: true };
     } catch (error) {
       const code = prismaErrorCode(error);
@@ -111,13 +209,66 @@ export class ProductsService {
     }
   }
 
-  private async ensureCategoryExists(categoryId: string) {
-    const category = await this.prisma.category.findUnique({
-      where: { id: categoryId },
+  private async ensureReferences(input: ProductInput) {
+    if (!input.brandId || !input.categoryId) {
+      throw new BadRequestException("Debes seleccionar una marca y categoría.");
+    }
+    const brand = await this.prisma.brand.findUnique({
+      where: { id: input.brandId },
       select: { id: true },
     });
-    if (!category) {
-      throw new NotFoundException("No se encontró la categoría seleccionada.");
+    if (!brand) {
+      throw new NotFoundException("No se encontró la marca seleccionada.");
     }
+
+    const category = await this.prisma.category.findUnique({
+      where: { id: input.categoryId },
+      select: { id: true, parentId: true },
+    });
+    if (!category) {
+      throw new NotFoundException(
+        "No se encontró la categoría principal seleccionada.",
+      );
+    }
+    if (category.parentId !== null) {
+      throw new BadRequestException(
+        "Debes seleccionar una categoría principal, no una subcategoría.",
+      );
+    }
+    if (input.subcategoryId) {
+      const subcategory = await this.prisma.category.findUnique({
+        where: { id: input.subcategoryId },
+        select: { id: true, parentId: true },
+      });
+      if (!subcategory) {
+        throw new NotFoundException("No se encontró la subcategoría.");
+      }
+      if (subcategory.parentId !== input.categoryId) {
+        throw new BadRequestException(
+          "La subcategoría debe pertenecer a la categoría principal seleccionada.",
+        );
+      }
+    }
+  }
+
+  private rethrowReferenceError(error: unknown): never {
+    const code = prismaErrorCode(error);
+    if (code === "P2003") {
+      throw new NotFoundException(
+        "La marca o categoría seleccionada ya no existe.",
+      );
+    }
+    if (code === "P2025") {
+      throw new NotFoundException("No se encontró el producto.");
+    }
+    if (
+      error instanceof Error &&
+      error.message.includes("Product_category_hierarchy_trigger")
+    ) {
+      throw new BadRequestException(
+        "La subcategoría debe pertenecer a la categoría principal seleccionada.",
+      );
+    }
+    throw error;
   }
 }

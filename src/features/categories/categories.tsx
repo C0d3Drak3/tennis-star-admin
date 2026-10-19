@@ -1,7 +1,17 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
-import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Fragment, useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  Eye,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -15,18 +25,26 @@ import {
   createCategory,
   deleteCategory,
   getCategories,
+  getCategory,
   updateCategory,
   type Category,
 } from "@/lib/api";
 
 const MAX_CATEGORY_NAME_LENGTH = 100;
 
+type SortColumn = "position" | "name" | "subcategoryCount" | "type";
+type SortDirection = "asc" | "desc";
+
+function compareNames(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { sensitivity: "base" });
+}
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 401) {
       return "Tu sesión no es válida. Inicia sesión nuevamente.";
     }
-    if (error.status === 409 || error.status === 400 || error.status === 404) {
+    if ([400, 404, 409].includes(error.status)) {
       return error.message;
     }
   }
@@ -40,7 +58,15 @@ export function Categories() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
   const [name, setName] = useState("");
+  const [level, setLevel] = useState<"main" | "sub">("main");
+  const [parentId, setParentId] = useState("");
+  const [position, setPosition] = useState("1");
+  const [search, setSearch] = useState("");
+  const [sortColumn, setSortColumn] = useState<SortColumn>("position");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -62,30 +88,149 @@ export function Categories() {
           setIsLoading(false);
         }
       });
-
     return () => {
       active = false;
     };
   }, []);
 
+  const mainCategories = useMemo(
+    () =>
+      categories
+        .filter((category) => !category.parentId)
+          .sort(
+            (a, b) =>
+              a.position - b.position ||
+              compareNames(a.name, b.name) ||
+              a.id.localeCompare(b.id),
+          ),
+    [categories],
+  );
+  const visibleCategories = useMemo(() => {
+    const normalizedSearch = search.trim().toLocaleLowerCase();
+    const filtered = categories.filter((category) =>
+      category.name.toLocaleLowerCase().includes(normalizedSearch),
+    );
+    const direction = sortDirection === "asc" ? 1 : -1;
+
+    return filtered.sort((a, b) => {
+      let primaryComparison = 0;
+      if (sortColumn === "position") {
+        primaryComparison = a.position - b.position;
+      } else if (sortColumn === "name") {
+        primaryComparison = compareNames(a.name, b.name);
+      } else if (sortColumn === "subcategoryCount") {
+        primaryComparison = a.subcategoryCount - b.subcategoryCount;
+      } else {
+        primaryComparison = Number(Boolean(a.parentId)) - Number(Boolean(b.parentId));
+      }
+
+      return (
+        primaryComparison * direction ||
+        compareNames(a.name, b.name) ||
+        a.id.localeCompare(b.id)
+      );
+    });
+  }, [categories, search, sortColumn, sortDirection]);
+
+  function resetForm() {
+    setEditingId(null);
+    setName("");
+    setLevel("main");
+    setParentId("");
+    setPosition(String(mainCategories.length + 1));
+    setIsFormOpen(false);
+  }
+
   function startEditing(category: Category) {
     setEditingId(category.id);
     setName(category.name);
+    setLevel(category.parentId ? "sub" : "main");
+    setParentId(category.parentId ?? "");
+    setPosition(String(category.position));
     setError("");
     setNotice("");
+    setIsFormOpen(true);
   }
 
-  function cancelEditing() {
-    setEditingId(null);
-    setName("");
+  function openNewCategoryForm() {
+    resetForm();
+    setError("");
+    setNotice("");
+    setIsFormOpen(true);
+  }
+
+  function toggleSort(column: SortColumn) {
+    if (sortColumn === column) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortColumn(column);
+    setSortDirection("asc");
+  }
+
+  function renderSortHeader(label: string, column: SortColumn) {
+    const active = sortColumn === column;
+    const Icon = !active
+      ? ArrowUpDown
+      : sortDirection === "asc"
+        ? ArrowUp
+        : ArrowDown;
+
+    return (
+      <th
+        aria-sort={
+          active
+            ? sortDirection === "asc"
+              ? "ascending"
+              : "descending"
+            : "none"
+        }
+        className="px-3 py-2 font-medium"
+      >
+        <button
+          aria-label={`Ordenar por ${label}${
+            active
+              ? sortDirection === "asc"
+                ? ", ascendente"
+                : ", descendente"
+              : ""
+          }`}
+          className="inline-flex items-center gap-1.5 hover:text-foreground"
+          onClick={() => toggleSort(column)}
+          type="button"
+        >
+          {label}
+          <Icon aria-hidden="true" className="size-3.5" />
+        </button>
+      </th>
+    );
+  }
+
+  async function handleDetails(categoryId: string) {
+    if (expandedId === categoryId) {
+      setExpandedId(null);
+      return;
+    }
+    setError("");
+    try {
+      const details = await getCategory(categoryId);
+      setCategories((current) =>
+        current.map((category) =>
+          category.id === details.id ? { ...category, ...details } : category,
+        ),
+      );
+      setExpandedId(categoryId);
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+    }
   }
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
     setNotice("");
-
     const normalizedName = name.trim();
+    const parsedPosition = Number(position);
     if (
       normalizedName.length === 0 ||
       normalizedName.length > MAX_CATEGORY_NAME_LENGTH
@@ -95,32 +240,54 @@ export function Categories() {
       );
       return;
     }
+    if (!Number.isSafeInteger(parsedPosition) || parsedPosition < 1) {
+      setError("La posición debe ser un número entero positivo.");
+      return;
+    }
+    if (level === "sub" && !mainCategories.some((item) => item.id === parentId)) {
+      setError("Selecciona una categoría principal existente.");
+      return;
+    }
+    if (editingId) {
+      const existing = categories.find((item) => item.id === editingId);
+      if (
+        existing &&
+        ((existing.parentId && level === "main" && existing.productCount) ||
+          (!existing.parentId &&
+            level === "sub" &&
+            (existing.subcategoryCount || existing.productCount)))
+      ) {
+        setError(
+          "No se puede cambiar el nivel de una categoría que tiene productos o subcategorías dependientes.",
+        );
+        return;
+      }
+    }
 
     setIsSaving(true);
     try {
+      const input = {
+        name: normalizedName,
+        parentId: level === "sub" ? parentId : null,
+        position: parsedPosition,
+      };
       if (editingId) {
-        const updated = await updateCategory(editingId, normalizedName);
-        setCategories((current) =>
-          current
-            .map((category) =>
-              category.id === updated.id
-                ? { ...category, ...updated }
-                : category,
-            )
-            .sort((a, b) => a.name.localeCompare(b.name, "es")),
-        );
+        await updateCategory(editingId, input);
         setNotice("Categoría actualizada.");
       } else {
-        const created = await createCategory(normalizedName);
-        setCategories((current) =>
-          [...current, created].sort((a, b) =>
-            a.name.localeCompare(b.name, "es"),
-          ),
+        await createCategory(input);
+        setNotice(
+          level === "main" ? "Categoría principal creada." : "Subcategoría creada.",
         );
-        setNotice("Categoría creada.");
       }
-      setEditingId(null);
-      setName("");
+      try {
+        setCategories(await getCategories());
+      } catch (refreshError) {
+        setError(
+          `La categoría se guardó, pero no se pudo actualizar el listado. ${getErrorMessage(refreshError)}`,
+        );
+      }
+      resetForm();
     } catch (requestError) {
       setError(getErrorMessage(requestError));
     } finally {
@@ -134,11 +301,15 @@ export function Categories() {
     setDeletingId(category.id);
     try {
       await deleteCategory(category.id);
-      setCategories((current) =>
-        current.filter((item) => item.id !== category.id),
-      );
       setPendingDeleteId(null);
       setNotice("Categoría eliminada.");
+      try {
+        setCategories(await getCategories());
+      } catch (refreshError) {
+        setError(
+          `La categoría se eliminó, pero no se pudo actualizar el listado. ${getErrorMessage(refreshError)}`,
+        );
+      }
     } catch (requestError) {
       setError(getErrorMessage(requestError));
     } finally {
@@ -148,7 +319,7 @@ export function Categories() {
 
   return (
     <section aria-labelledby="categories-title" className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1
             id="categories-title"
@@ -157,159 +328,251 @@ export function Categories() {
             Categorías
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Organiza los productos del catálogo por categoría.
+            Organiza el catálogo en categorías principales y subcategorías.
           </p>
         </div>
+        <Button onClick={openNewCategoryForm} type="button">
+          <Plus aria-hidden="true" data-icon="inline-start" />
+          Nueva categoría
+        </Button>
       </div>
 
-      <Card className="rounded-lg">
-        <CardHeader>
-          <CardTitle>{editingId ? "Editar categoría" : "Nueva categoría"}</CardTitle>
-          <CardDescription>
-            El nombre debe ser único y tener hasta {MAX_CATEGORY_NAME_LENGTH}{" "}
-            caracteres.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form
-            className="flex flex-col gap-3 sm:flex-row sm:items-end"
-            onSubmit={handleSave}
-            noValidate
-          >
-            <div className="min-w-0 flex-1 space-y-1.5">
-              <label htmlFor="category-name" className="text-sm font-medium">
-                Nombre de la categoría
-              </label>
-              <input
-                autoComplete="off"
-                className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-none transition-shadow placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+      {isFormOpen && (
+        <Card className="rounded-lg">
+          <CardHeader>
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1.5">
+                <CardTitle>{editingId ? "Editar categoría" : "Nueva categoría"}</CardTitle>
+                <CardDescription>
+                  La jerarquía admite categorías principales y un solo nivel de
+                  subcategorías.
+                </CardDescription>
+              </div>
+              <Button
+                aria-label="Cerrar formulario"
                 disabled={isSaving}
-                id="category-name"
-                maxLength={MAX_CATEGORY_NAME_LENGTH}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Ej. Calzado"
-                required
-                value={name}
-              />
-            </div>
-            <div className="flex gap-2">
-              <Button disabled={isSaving} type="submit">
-                {editingId ? (
-                  <Check aria-hidden="true" data-icon="inline-start" />
-                ) : (
-                  <Plus aria-hidden="true" data-icon="inline-start" />
-                )}
-                {isSaving
-                  ? "Guardando…"
-                  : editingId
-                    ? "Guardar cambios"
-                    : "Crear categoría"}
+                onClick={resetForm}
+                size="icon-sm"
+                type="button"
+                variant="outline"
+              >
+                <X aria-hidden="true" />
               </Button>
-              {editingId && (
-                <Button
-                  disabled={isSaving}
-                  onClick={cancelEditing}
-                  type="button"
-                  variant="outline"
-                >
-                  <X aria-hidden="true" data-icon="inline-start" />
-                  Cancelar
-                </Button>
-              )}
             </div>
-          </form>
-          {error && (
-            <p
-              role="alert"
-              className="mt-4 rounded-md border border-destructive/30 px-3 py-2 text-sm text-destructive"
+          </CardHeader>
+          <CardContent>
+            <form
+              className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+              onSubmit={handleSave}
+              noValidate
             >
-              {error}
-            </p>
-          )}
-          {notice && (
-            <p role="status" className="mt-4 text-sm text-muted-foreground">
-              {notice}
-            </p>
-          )}
-        </CardContent>
-      </Card>
+              <div className="space-y-1.5">
+                <label htmlFor="category-level" className="text-sm font-medium">
+                  Nivel
+                </label>
+                <select
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  disabled={isSaving}
+                  id="category-level"
+                  onChange={(event) => {
+                    setLevel(event.target.value as "main" | "sub");
+                    setParentId("");
+                  }}
+                  value={level}
+                >
+                  <option value="main">Principal</option>
+                  <option value="sub">Subcategoría</option>
+                </select>
+              </div>
+              {level === "sub" && (
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="category-parent"
+                    className="text-sm font-medium"
+                  >
+                    Categoría padre
+                  </label>
+                  <select
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    disabled={isSaving}
+                    id="category-parent"
+                    onChange={(event) => setParentId(event.target.value)}
+                    required
+                    value={parentId}
+                  >
+                    <option value="">Selecciona categoría principal</option>
+                    {mainCategories
+                      .filter((item) => item.id !== editingId)
+                      .map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <label htmlFor="category-name" className="text-sm font-medium">
+                  Nombre
+                </label>
+                <input
+                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+                  disabled={isSaving}
+                  id="category-name"
+                  maxLength={MAX_CATEGORY_NAME_LENGTH}
+                  onChange={(event) => setName(event.target.value)}
+                  required
+                  value={name}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="category-position"
+                  className="text-sm font-medium"
+                >
+                  Posición
+                </label>
+                <input
+                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+                  disabled={isSaving}
+                  id="category-position"
+                  min={1}
+                  onChange={(event) => setPosition(event.target.value)}
+                  required
+                  type="number"
+                  value={position}
+                />
+              </div>
+              <div className="flex items-end gap-2 sm:col-span-2 lg:col-span-4">
+                <Button disabled={isSaving} type="submit">
+                  <Plus aria-hidden="true" data-icon="inline-start" />
+                  {isSaving
+                    ? "Guardando…"
+                    : editingId
+                      ? "Guardar cambios"
+                      : "Crear categoría"}
+                </Button>
+                {editingId && (
+                  <Button
+                    disabled={isSaving}
+                    onClick={resetForm}
+                    type="button"
+                    variant="outline"
+                  >
+                    <X aria-hidden="true" data-icon="inline-start" />
+                    Cancelar
+                  </Button>
+                )}
+              </div>
+            </form>
+            {error && (
+              <p
+                role="alert"
+                className="mt-4 rounded-md border border-destructive/30 px-3 py-2 text-sm text-destructive"
+              >
+                {error}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {!isFormOpen && error && (
+        <p
+          role="alert"
+          className="rounded-md border border-destructive/30 px-3 py-2 text-sm text-destructive"
+        >
+          {error}
+        </p>
+      )}
+      {notice && (
+        <p role="status" className="text-sm text-muted-foreground">
+          {notice}
+        </p>
+      )}
 
       <Card className="rounded-lg">
         <CardHeader>
           <CardTitle>Categorías existentes</CardTitle>
           <CardDescription>
-            {categories.length}{" "}
-            {categories.length === 1 ? "categoría" : "categorías"}
+            {categories.length} {categories.length === 1 ? "registro" : "registros"}
           </CardDescription>
         </CardHeader>
         <CardContent>
+          <label className="relative mb-4 block max-w-sm">
+            <span className="sr-only">Buscar por nombre</span>
+            <Search
+              aria-hidden="true"
+              className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <input
+              className="h-9 w-full rounded-md border border-input bg-transparent pl-9 pr-3 text-sm"
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Buscar por nombre…"
+              type="search"
+              value={search}
+            />
+          </label>
           {isLoading ? (
             <p role="status" className="py-8 text-center text-sm text-muted-foreground">
               Cargando categorías…
             </p>
           ) : error && categories.length === 0 ? (
-            <div className="space-y-3 py-6 text-center">
-              <p className="text-sm text-muted-foreground">{error}</p>
-              <Button
-                onClick={() => window.location.reload()}
-                type="button"
-                variant="outline"
-              >
-                Reintentar
-              </Button>
-            </div>
+            <p className="py-8 text-center text-sm text-muted-foreground">{error}</p>
           ) : categories.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              Todavía no hay categorías. Crea la primera desde el formulario.
+              No hay categorías cargadas.
+            </p>
+          ) : visibleCategories.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              No se encontraron categorías con ese nombre.
             </p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[520px] text-left text-sm">
+              <table className="w-full min-w-[860px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-border text-xs text-muted-foreground">
-                    <th className="px-3 py-2 font-medium">Nombre</th>
-                    <th className="px-3 py-2 font-medium">Productos</th>
-                    <th className="px-3 py-2 text-right font-medium">
-                      Acciones
-                    </th>
+                    {renderSortHeader("Posición", "position")}
+                    {renderSortHeader("Nombre", "name")}
+                    {renderSortHeader("Subcategorías", "subcategoryCount")}
+                    {renderSortHeader("Tipo", "type")}
+                    <th className="px-3 py-2 font-medium">Categoría padre</th>
+                    <th className="px-3 py-2 text-right font-medium">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {categories.map((category) => (
-                    <tr key={category.id} className="border-b border-border last:border-0">
-                      <td className="px-3 py-3 font-medium">{category.name}</td>
-                      <td className="px-3 py-3 text-muted-foreground">
-                        {category.productCount ?? 0}
-                      </td>
-                      <td className="px-3 py-3">
-                        {pendingDeleteId === category.id ? (
-                          <div className="flex items-center justify-end gap-2">
-                            <span className="text-xs text-muted-foreground">
-                              ¿Eliminar esta categoría?
-                            </span>
+                  {visibleCategories.map((category) => (
+                    <Fragment key={category.id}>
+                      <tr
+                        className="border-b border-border last:border-0"
+                      >
+                        <td className="px-3 py-3">{category.position}</td>
+                        <td className="px-3 py-3 font-medium">
+                          <span className={category.parentId ? "pl-5 text-muted-foreground" : ""}>
+                            {category.parentId ? "↳ " : ""}
+                            {category.name}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 text-muted-foreground">
+                          {category.subcategoryCount}
+                        </td>
+                        <td className="px-3 py-3 text-muted-foreground">
+                          {category.parentId ? "Subcategoría" : "Principal"}
+                        </td>
+                        <td className="px-3 py-3 text-muted-foreground">
+                          {category.parent?.name ?? "—"}
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="flex justify-end gap-2">
                             <Button
-                              disabled={deletingId === category.id}
-                              onClick={() => void confirmDelete(category)}
-                              size="sm"
-                              type="button"
-                              variant="destructive"
-                            >
-                              {deletingId === category.id
-                                ? "Eliminando…"
-                                : "Confirmar"}
-                            </Button>
-                            <Button
-                              disabled={deletingId === category.id}
-                              onClick={() => setPendingDeleteId(null)}
-                              size="sm"
+                              aria-label={`Consultar ${category.name}`}
+                              onClick={() => void handleDetails(category.id)}
+                              size="icon-sm"
                               type="button"
                               variant="outline"
                             >
-                              Cancelar
+                              <Eye aria-hidden="true" />
                             </Button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center justify-end gap-2">
                             <Button
                               aria-label={`Editar ${category.name}`}
                               onClick={() => startEditing(category)}
@@ -319,25 +582,74 @@ export function Categories() {
                             >
                               <Pencil aria-hidden="true" />
                             </Button>
-                            {category.productCount ? (
-                              <span className="text-xs text-muted-foreground">
-                                No se puede eliminar: tiene productos
+                            <Button
+                              aria-label={`Eliminar ${category.name}`}
+                              disabled={
+                                deletingId === category.id ||
+                                Boolean(category.productCount) ||
+                                Boolean(category.subcategoryCount)
+                              }
+                              onClick={() => setPendingDeleteId(category.id)}
+                              size="icon-sm"
+                              type="button"
+                              variant="outline"
+                            >
+                              <Trash2 aria-hidden="true" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                      {expandedId === category.id && (
+                        <tr key={`${category.id}-details`}>
+                          <td
+                            className="bg-muted/40 px-3 py-3 text-xs text-muted-foreground"
+                            colSpan={6}
+                          >
+                            {category.parent
+                              ? `Subcategoría de ${category.parent.name}.`
+                              : category.children?.length
+                                ? `Subcategorías: ${category.children
+                                    .map((child) => child.name)
+                                    .join(", ")}.`
+                                : "Categoría principal sin subcategorías."}
+                            {category.productCount
+                              ? ` Productos asociados: ${category.productCount}.`
+                              : ""}
+                          </td>
+                        </tr>
+                      )}
+                      {pendingDeleteId === category.id && (
+                        <tr key={`${category.id}-confirm`}>
+                          <td className="px-3 py-3 text-sm" colSpan={6}>
+                            <div className="flex flex-wrap items-center justify-end gap-2">
+                              <span className="mr-auto">
+                                ¿Eliminar “{category.name}”?
                               </span>
-                            ) : (
                               <Button
-                                aria-label={`Eliminar ${category.name}`}
-                                onClick={() => setPendingDeleteId(category.id)}
-                                size="icon-sm"
+                                disabled={deletingId === category.id}
+                                onClick={() => void confirmDelete(category)}
+                                size="sm"
+                                type="button"
+                                variant="destructive"
+                              >
+                                {deletingId === category.id
+                                  ? "Eliminando…"
+                                  : "Confirmar"}
+                              </Button>
+                              <Button
+                                disabled={deletingId === category.id}
+                                onClick={() => setPendingDeleteId(null)}
+                                size="sm"
                                 type="button"
                                 variant="outline"
                               >
-                                <Trash2 aria-hidden="true" />
+                                Cancelar
                               </Button>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
