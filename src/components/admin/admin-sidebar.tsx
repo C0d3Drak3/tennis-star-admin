@@ -51,6 +51,8 @@ export function AdminSidebar({
                 ? "/"
                 : label === "Categorías"
                   ? "/categories"
+                  : label === "Productos"
+                    ? "/products"
                   : null;
 
             return (

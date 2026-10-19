@@ -146,3 +146,51 @@ export function deleteCategory(id: string): Promise<{ success: boolean }> {
     { method: "DELETE" },
   );
 }
+
+export interface Product {
+  id: string;
+  name: string;
+  description: string | null;
+  price: string;
+  isActive: boolean;
+  categoryId: string;
+  category: Pick<Category, "id" | "name">;
+  saleItemCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProductInput {
+  name: string;
+  price: string;
+  description: string | null;
+  categoryId: string;
+}
+
+export function getProducts(): Promise<Product[]> {
+  return request<Product[]>("/products");
+}
+
+export function createProduct(input: ProductInput): Promise<Product> {
+  return request<Product>("/products", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateProduct(
+  id: string,
+  input: Partial<ProductInput> & { isActive?: boolean },
+): Promise<Product> {
+  return request<Product>(`/products/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteProduct(id: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(
+    `/products/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
+}
