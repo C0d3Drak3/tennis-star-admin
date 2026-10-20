@@ -451,8 +451,20 @@ export interface Product {
   stock: number;
   saleItemCount?: number;
   activeSaleItemCount?: number;
+  options: ProductOption[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ProductOption {
+  id: string;
+  name: string;
+  values: string[];
+}
+
+export interface ProductOptionInput {
+  name: string;
+  values: string[];
 }
 
 export interface ProductInput {
@@ -463,6 +475,7 @@ export interface ProductInput {
   categoryId: string;
   subcategoryId: string | null;
   stock: number;
+  options: ProductOptionInput[];
 }
 
 export interface ProductList {
@@ -498,7 +511,10 @@ export function getProducts(filters: ProductFilters = {}): Promise<ProductList> 
 function productFormData(input: Partial<ProductInput>, image: File): FormData {
   const formData = new FormData();
   for (const [key, value] of Object.entries(input)) {
-    formData.append(key, value === null ? "" : String(value));
+    formData.append(
+      key,
+      value === null ? "" : key === "options" ? JSON.stringify(value) : String(value),
+    );
   }
   formData.append("image", image);
   return formData;

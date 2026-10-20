@@ -26,8 +26,22 @@ import {
 const MAX_PRODUCT_NAME_LENGTH = 200;
 const MAX_DESCRIPTION_LENGTH = 2_000;
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
+const MAX_PRODUCT_OPTIONS = 20;
+const MAX_OPTION_VALUES = 50;
+const MAX_OPTION_NAME_LENGTH = 100;
+const MAX_OPTION_VALUE_LENGTH = 100;
 const PRICE_PATTERN = /^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/;
 const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+
+interface ProductOptionDraft {
+  id: string;
+  name: string;
+  values: string[];
+}
+
+function normalizeOptionValue(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
 
 function isPositivePrice(value: string): boolean {
   if (!PRICE_PATTERN.test(value)) return false;
@@ -93,6 +107,16 @@ export function ProductForm({
   const [categoryId, setCategoryId] = useState(editingProduct?.categoryId ?? "");
   const [subcategoryId, setSubcategoryId] = useState(editingProduct?.subcategoryId ?? "");
   const [stock, setStock] = useState(editingProduct ? String(editingProduct.stock) : "");
+  const nextOptionId = useRef(0);
+  const [options, setOptions] = useState<ProductOptionDraft[]>(
+    () =>
+      editingProduct?.options.map((option, index) => ({
+        id: `existing-${index}`,
+        name: option.name,
+        values: [...option.values],
+      })) ?? [],
+  );
+  const [newOptionValues, setNewOptionValues] = useState<Record<string, string>>({});
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imageButtonHovered, setImageButtonHovered] = useState(false);
   const [imageInputFocused, setImageInputFocused] = useState(false);
@@ -212,6 +236,44 @@ export function ProductForm({
       return;
     }
 
+    if (options.length > MAX_PRODUCT_OPTIONS) {
+      setFormError(`Puedes agregar hasta ${MAX_PRODUCT_OPTIONS} secciones de opciones.`);
+      return;
+    }
+    const normalizedOptions = [];
+    for (const option of options) {
+      const normalizedOptionName = option.name.trim();
+      const normalizedValues = option.values.map((value) => value.trim());
+      if (
+        !normalizedOptionName ||
+        normalizedOptionName.length > MAX_OPTION_NAME_LENGTH
+      ) {
+        setFormError(
+          `Cada opción debe tener un nombre de hasta ${MAX_OPTION_NAME_LENGTH} caracteres.`,
+        );
+        return;
+      }
+      if (
+        normalizedValues.length > MAX_OPTION_VALUES ||
+        normalizedValues.some(
+          (value) => !value || value.length > MAX_OPTION_VALUE_LENGTH,
+        )
+      ) {
+        setFormError(
+          `Cada opción admite hasta ${MAX_OPTION_VALUES} valores de hasta ${MAX_OPTION_VALUE_LENGTH} caracteres.`,
+        );
+        return;
+      }
+      if (
+        new Set(normalizedValues.map(normalizeOptionValue)).size !==
+        normalizedValues.length
+      ) {
+        setFormError("No repitas valores dentro de una misma opción.");
+        return;
+      }
+      normalizedOptions.push({ name: normalizedOptionName, values: normalizedValues });
+    }
+
     const input: ProductInput = {
       name: normalizedName,
       price: normalizedPrice,
@@ -220,6 +282,7 @@ export function ProductForm({
       categoryId,
       subcategoryId: subcategoryId || null,
       stock: parsedStock,
+      options: normalizedOptions,
     };
 
     setIsSaving(true);
@@ -237,6 +300,47 @@ export function ProductForm({
       setIsSaving(false);
       onSavingChange?.(false);
     }
+  }
+
+  function addOptionSection() {
+    if (options.length >= MAX_PRODUCT_OPTIONS) return;
+    setOptions((current) => [
+      ...current,
+      { id: `new-${nextOptionId.current++}`, name: "", values: [] },
+    ]);
+  }
+
+  function updateOption(
+    optionId: string,
+    update: (option: ProductOptionDraft) => ProductOptionDraft,
+  ) {
+    setOptions((current) =>
+      current.map((option) => (option.id === optionId ? update(option) : option)),
+    );
+  }
+
+  function addOptionValue(option: ProductOptionDraft) {
+    const value = (newOptionValues[option.id] ?? "").trim();
+    if (!value) return;
+    if (
+      option.values.some(
+        (existingValue) =>
+          normalizeOptionValue(existingValue) === normalizeOptionValue(value),
+      )
+    ) {
+      setFormError("Ese valor ya está agregado en esta opción.");
+      return;
+    }
+    if (option.values.length >= MAX_OPTION_VALUES) {
+      setFormError(`Cada opción admite hasta ${MAX_OPTION_VALUES} valores.`);
+      return;
+    }
+    setFormError("");
+    updateOption(option.id, (current) => ({
+      ...current,
+      values: [...current.values, value],
+    }));
+    setNewOptionValues((current) => ({ ...current, [option.id]: "" }));
   }
 
   return (
@@ -423,6 +527,147 @@ export function ProductForm({
               </div>
             )}
           </div>
+          <section aria-labelledby="product-options-title" className="space-y-3">
+            <div className="space-y-1">
+              <h3 className="text-sm font-semibold" id="product-options-title">
+                Opciones de productos
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                Definí las características que tendrán variaciones, como color, talla, material, etc.
+              </p>
+            </div>
+            <div className="space-y-3">
+              {options.map((option, index) => (
+                <fieldset
+                  className="min-w-0 space-y-3 rounded-md border border-border p-3"
+                  key={option.id}
+                >
+                  <legend className="sr-only">Sección de opción {index + 1}</legend>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      <label className="text-sm font-medium" htmlFor={`product-option-name-${option.id}`}>
+                        Nombre de la opción
+                      </label>
+                      <input
+                        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        disabled={isSaving}
+                        id={`product-option-name-${option.id}`}
+                        maxLength={MAX_OPTION_NAME_LENGTH}
+                        onChange={(event) =>
+                          updateOption(option.id, (current) => ({
+                            ...current,
+                            name: event.target.value,
+                          }))
+                        }
+                        placeholder="Por ejemplo, Color"
+                        value={option.name}
+                      />
+                    </div>
+                    <Button
+                      aria-label={`Eliminar sección ${option.name || index + 1}`}
+                      disabled={isSaving}
+                      onClick={() => {
+                        setOptions((current) => current.filter(({ id }) => id !== option.id));
+                        setNewOptionValues((current) => {
+                          const remaining = { ...current };
+                          delete remaining[option.id];
+                          return remaining;
+                        });
+                      }}
+                      size="icon-sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      <X aria-hidden="true" />
+                    </Button>
+                  </div>
+                  <div className="space-y-2">
+                    <span className="text-sm font-medium">Valores disponibles</span>
+                    <div className="space-y-2">
+                      {option.values.map((value, valueIndex) => (
+                        <div className="flex min-w-0 items-center gap-2" key={`${option.id}-value-${valueIndex}`}>
+                          <input
+                            aria-label={`Valor ${valueIndex + 1} de ${option.name || "opción"}`}
+                            className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm"
+                            disabled={isSaving}
+                            maxLength={MAX_OPTION_VALUE_LENGTH}
+                            onChange={(event) =>
+                              updateOption(option.id, (current) => ({
+                                ...current,
+                                values: current.values.map((currentValue, currentIndex) =>
+                                  currentIndex === valueIndex ? event.target.value : currentValue,
+                                ),
+                              }))
+                            }
+                            value={value}
+                          />
+                          <Button
+                            aria-label={`Eliminar valor ${value || valueIndex + 1}`}
+                            disabled={isSaving}
+                            onClick={() =>
+                              updateOption(option.id, (current) => ({
+                                ...current,
+                                values: current.values.filter((_, currentIndex) => currentIndex !== valueIndex),
+                              }))
+                            }
+                            size="icon-sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            <X aria-hidden="true" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex min-w-0 flex-wrap gap-2">
+                      <input
+                        aria-label={`Nuevo valor para ${option.name || "opción"}`}
+                        className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm sm:max-w-xs"
+                        disabled={isSaving || option.values.length >= MAX_OPTION_VALUES}
+                        maxLength={MAX_OPTION_VALUE_LENGTH}
+                        onChange={(event) =>
+                          setNewOptionValues((current) => ({
+                            ...current,
+                            [option.id]: event.target.value,
+                          }))
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            addOptionValue(option);
+                          }
+                        }}
+                        placeholder="Escribe un valor"
+                        value={newOptionValues[option.id] ?? ""}
+                      />
+                      <Button
+                        disabled={
+                          isSaving ||
+                          !(newOptionValues[option.id] ?? "").trim() ||
+                          option.values.length >= MAX_OPTION_VALUES
+                        }
+                        onClick={() => addOptionValue(option)}
+                        type="button"
+                        variant="outline"
+                      >
+                        <Plus aria-hidden="true" data-icon="inline-start" />
+                        Agregar opción
+                      </Button>
+                    </div>
+                  </div>
+                </fieldset>
+              ))}
+            </div>
+            <Button
+              disabled={isSaving || options.length >= MAX_PRODUCT_OPTIONS}
+              onClick={addOptionSection}
+              type="button"
+              variant="outline"
+            >
+              <Plus aria-hidden="true" data-icon="inline-start" />
+              Agregar sección
+            </Button>
+          </section>
           {referencesLoading && (
             <p role="status" className="text-sm text-muted-foreground">
               Cargando marcas y categorías…

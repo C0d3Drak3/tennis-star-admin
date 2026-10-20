@@ -7,6 +7,12 @@ export interface ProductInput {
   subcategoryId?: string | null;
   stock?: number;
   isActive?: boolean;
+  options?: ProductOptionInput[];
+}
+
+export interface ProductOptionInput {
+  name: string;
+  values: string[];
 }
 
 export interface CreateProductInput extends ProductInput {

@@ -23,6 +23,7 @@ import type {
   CreateProductInput,
   ProductInput,
   ProductListFilters,
+  ProductOptionInput,
   ProductSortColumn,
   SortDirection,
 } from "./products.types";
@@ -36,6 +37,63 @@ const SUPPORTED_IMAGE_TYPES = new Set([
   "image/gif",
   "image/webp",
 ]);
+const MAX_PRODUCT_OPTIONS = 20;
+const MAX_OPTION_VALUES = 50;
+const MAX_OPTION_NAME_LENGTH = 100;
+const MAX_OPTION_VALUE_LENGTH = 100;
+
+function parseProductOptions(value: unknown): ProductOptionInput[] {
+  let optionsValue = value;
+  if (typeof optionsValue === "string") {
+    try {
+      optionsValue = JSON.parse(optionsValue);
+    } catch {
+      throw new BadRequestException("Las opciones del producto no son válidas.");
+    }
+  }
+  if (!Array.isArray(optionsValue) || optionsValue.length > MAX_PRODUCT_OPTIONS) {
+    throw new BadRequestException("Las opciones del producto no son válidas.");
+  }
+
+  return optionsValue.map((option: unknown) => {
+    if (
+      typeof option !== "object" ||
+      option === null ||
+      Array.isArray(option) ||
+      !("name" in option) ||
+      !("values" in option)
+    ) {
+      throw new BadRequestException("Cada opción debe tener nombre y valores.");
+    }
+    const { name, values } = option;
+    if (
+      typeof name !== "string" ||
+      name.trim().length === 0 ||
+      name.trim().length > MAX_OPTION_NAME_LENGTH ||
+      !Array.isArray(values) ||
+      values.length > MAX_OPTION_VALUES
+    ) {
+      throw new BadRequestException("El nombre o los valores de una opción no son válidos.");
+    }
+    const normalizedValues = values.map((value: unknown) => {
+      if (
+        typeof value !== "string" ||
+        value.trim().length === 0 ||
+        value.trim().length > MAX_OPTION_VALUE_LENGTH
+      ) {
+        throw new BadRequestException("Los valores de opción no pueden estar vacíos y deben tener hasta 100 caracteres.");
+      }
+      return value.trim();
+    });
+    const uniqueValues = new Set(
+      normalizedValues.map((value) => value.replace(/\s+/g, " ").toLowerCase()),
+    );
+    if (uniqueValues.size !== normalizedValues.length) {
+      throw new BadRequestException("No repitas valores dentro de una misma opción.");
+    }
+    return { name: name.trim(), values: normalizedValues };
+  });
+}
 
 function validateProductBody(body: unknown, partial: false): CreateProductInput;
 function validateProductBody(body: unknown, partial: true): ProductInput;
@@ -57,6 +115,7 @@ function validateProductBody(
     "subcategoryId",
     "stock",
     "isActive",
+    "options",
   ]);
   if (Object.keys(candidate).some((key) => !allowedFields.has(key))) {
     throw new BadRequestException("Los datos del producto no son válidos.");
@@ -78,6 +137,9 @@ function validateProductBody(
   }
 
   const input: ProductInput = {};
+  if ("options" in candidate) {
+    input.options = parseProductOptions(candidate.options);
+  }
   if ("name" in candidate) {
     if (
       typeof candidate.name !== "string" ||

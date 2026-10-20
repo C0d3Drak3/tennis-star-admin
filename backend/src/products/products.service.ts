@@ -79,6 +79,7 @@ export class ProductsService {
           brand: { select: { id: true, name: true } },
           category: { select: { id: true, name: true } },
           subcategory: { select: { id: true, name: true } },
+          options: { select: { id: true, name: true, values: true } },
           _count: {
             select: { saleItems: true },
           },
@@ -126,11 +127,22 @@ export class ProductsService {
           stock: input.stock,
           description: input.description ?? null,
           imageUrl,
+          ...(input.options
+            ? {
+                options: {
+                  create: input.options.map((option) => ({
+                    name: option.name,
+                    values: option.values,
+                  })),
+                },
+              }
+            : {}),
         },
         include: {
           brand: { select: { id: true, name: true } },
           category: { select: { id: true, name: true } },
           subcategory: { select: { id: true, name: true } },
+          options: { select: { id: true, name: true, values: true } },
         },
       });
     } catch (error) {
@@ -165,16 +177,29 @@ export class ProductsService {
     });
     const nextImageUrl = image ? await this.imageStorage.save(image) : undefined;
     try {
+      const { options, ...productData } = input;
       const updated = await this.prisma.product.update({
         where: { id },
         data: {
-          ...input,
+          ...productData,
+          ...(options !== undefined
+            ? {
+                options: {
+                  deleteMany: {},
+                  create: options.map((option) => ({
+                    name: option.name,
+                    values: option.values,
+                  })),
+                },
+              }
+            : {}),
           ...(nextImageUrl ? { imageUrl: nextImageUrl } : {}),
         },
         include: {
           brand: { select: { id: true, name: true } },
           category: { select: { id: true, name: true } },
           subcategory: { select: { id: true, name: true } },
+          options: { select: { id: true, name: true, values: true } },
         },
       });
       if (nextImageUrl && nextImageUrl !== current.imageUrl) {
