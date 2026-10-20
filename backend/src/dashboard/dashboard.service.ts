@@ -7,7 +7,14 @@ export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getSummary() {
-    const [inventoryCount, inventoryProducts, inventoryValue, recentOrders, topProducts] =
+    const [
+      inventoryCount,
+      inventoryProducts,
+      inventoryValue,
+      recentOrders,
+      topProducts,
+      lowStockProducts,
+    ] =
       await Promise.all([
         this.prisma.product.count({ where: { stock: { gt: 0 } } }),
         this.prisma.product.findMany({
@@ -45,6 +52,11 @@ export class DashboardService {
           orderBy: [{ _sum: { quantity: "desc" } }, { productName: "asc" }],
           take: 5,
         }),
+        this.prisma.product.findMany({
+          where: { stock: { lt: 10 } },
+          orderBy: [{ stock: "asc" }, { name: "asc" }, { id: "asc" }],
+          select: { id: true, name: true, stock: true },
+        }),
       ]);
 
     return {
@@ -69,6 +81,7 @@ export class DashboardService {
         name: product.productName,
         quantity: product._sum.quantity ?? 0,
       })),
+      lowStockProducts,
     };
   }
 }

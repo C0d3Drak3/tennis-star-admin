@@ -342,6 +342,7 @@ export interface DashboardSummary {
     createdAt: string;
   }[];
   topProducts: { name: string; quantity: number }[];
+  lowStockProducts: { id: string; name: string; stock: number }[];
 }
 
 function queryString(filters: object): string {

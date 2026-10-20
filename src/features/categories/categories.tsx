@@ -71,6 +71,11 @@ export function Categories() {
   const [notice, setNotice] = useState("");
   const isSavingRef = useRef(false);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const deleteErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [deleteError, setDeleteError] = useState<{
+    categoryId: string;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -94,6 +99,15 @@ export function Categories() {
       active = false;
     };
   }, []);
+
+  useEffect(
+    () => () => {
+      if (deleteErrorTimerRef.current) {
+        clearTimeout(deleteErrorTimerRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!isFormOpen) return;
@@ -180,11 +194,18 @@ export function Categories() {
     setName("");
     setLevel("main");
     setParentId("");
-    setPosition(String(mainCategories.length + 1));
+    const maxPosition = categories.reduce(
+      (highest, category) => Math.max(highest, category.position),
+      0,
+    );
+    setPosition(String(maxPosition + 1));
     setIsFormOpen(false);
   }
 
   function startEditing(category: Category) {
+    setPendingDeleteId(null);
+    setExpandedId(null);
+    clearDeleteError();
     setEditingId(category.id);
     setName(category.name);
     setLevel(category.parentId ? "sub" : "main");
@@ -196,6 +217,9 @@ export function Categories() {
   }
 
   function openNewCategoryForm() {
+    setPendingDeleteId(null);
+    setExpandedId(null);
+    clearDeleteError();
     resetForm();
     setError("");
     setNotice("");
@@ -250,6 +274,8 @@ export function Categories() {
   }
 
   async function handleDetails(categoryId: string) {
+    setPendingDeleteId(null);
+    clearDeleteError();
     if (expandedId === categoryId) {
       setExpandedId(null);
       return;
@@ -343,10 +369,12 @@ export function Categories() {
   async function confirmDelete(category: Category) {
     setError("");
     setNotice("");
+    clearDeleteError();
     setDeletingId(category.id);
     try {
       await deleteCategory(category.id);
       setPendingDeleteId(null);
+      setExpandedId(null);
       setNotice("Categoría eliminada.");
       try {
         setCategories(await getCategories());
@@ -356,14 +384,38 @@ export function Categories() {
         );
       }
     } catch (requestError) {
-      setError(getErrorMessage(requestError));
+      setPendingDeleteId(null);
+      const message = getErrorMessage(requestError);
+      const hasAssignedProducts =
+        (category.productCount ?? 0) > 0 || /productos/i.test(message);
+      setDeleteError({
+        categoryId: category.id,
+        message:
+          hasAssignedProducts &&
+          requestError instanceof ApiError &&
+          requestError.status === 409
+            ? "No se puede eliminar porque la categoría tiene productos asignados."
+            : message,
+      });
+      deleteErrorTimerRef.current = setTimeout(() => {
+        setDeleteError(null);
+        deleteErrorTimerRef.current = null;
+      }, 10_000);
     } finally {
       setDeletingId(null);
     }
   }
 
+  function clearDeleteError() {
+    if (deleteErrorTimerRef.current) {
+      clearTimeout(deleteErrorTimerRef.current);
+      deleteErrorTimerRef.current = null;
+    }
+    setDeleteError(null);
+  }
+
   return (
-    <section aria-labelledby="categories-title" className="space-y-5">
+    <section aria-labelledby="categories-title" className="min-w-0 max-w-full space-y-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1
@@ -376,7 +428,7 @@ export function Categories() {
             Organiza el catálogo en categorías principales y subcategorías.
           </p>
         </div>
-        <Button onClick={openNewCategoryForm} type="button">
+        <Button disabled={isLoading} onClick={openNewCategoryForm} type="button">
           <Plus aria-hidden="true" data-icon="inline-start" />
           Nueva categoría
         </Button>
@@ -562,14 +614,14 @@ export function Categories() {
         </p>
       )}
 
-      <Card className="rounded-lg">
+      <Card className="min-w-0 max-w-full rounded-lg">
         <CardHeader>
           <CardTitle>Categorías existentes</CardTitle>
           <CardDescription>
             {categories.length} {categories.length === 1 ? "registro" : "registros"}
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="min-w-0 max-w-full">
           <label className="relative mb-4 block max-w-sm">
             <span className="sr-only">Buscar por nombre</span>
             <Search
@@ -599,14 +651,17 @@ export function Categories() {
               No se encontraron categorías con ese nombre.
             </p>
           ) : (
-            <div className="overflow-x-auto">
+            <div
+              aria-label="Tabla de categorías"
+              className="w-full min-w-0 max-w-full overflow-x-auto overscroll-x-contain"
+              tabIndex={0}
+            >
               <table className="w-full min-w-[860px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-border text-xs text-muted-foreground">
                     {renderSortHeader("Posición", "position")}
                     {renderSortHeader("Nombre", "name")}
                     {renderSortHeader("Subcategorías", "subcategoryCount")}
-                    {renderSortHeader("Tipo", "type")}
                     <th className="px-3 py-2 font-medium">Categoría padre</th>
                     <th className="px-3 py-2 text-right font-medium">Acciones</th>
                   </tr>
@@ -618,20 +673,23 @@ export function Categories() {
                         className="border-b border-border last:border-0"
                       >
                         <td className="px-3 py-3">{category.position}</td>
-                        <td className="px-3 py-3 font-medium">
-                          <span className={category.parentId ? "pl-5 text-muted-foreground" : ""}>
-                            {category.parentId ? "↳ " : ""}
-                            {category.name}
-                          </span>
-                        </td>
+                        <td className="px-3 py-3 font-medium">{category.name}</td>
                         <td className="px-3 py-3 text-muted-foreground">
                           {category.subcategoryCount}
                         </td>
-                        <td className="px-3 py-3 text-muted-foreground">
-                          {category.parentId ? "Subcategoría" : "Principal"}
-                        </td>
-                        <td className="px-3 py-3 text-muted-foreground">
-                          {category.parent?.name ?? "—"}
+                        <td className="px-3 py-3">
+                          {category.parentId ? (
+                            <span
+                              className="inline-flex max-w-full truncate rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-800"
+                              title={category.parent?.name ?? "Categoría padre no disponible"}
+                            >
+                              {category.parent?.name ?? "—"}
+                            </span>
+                          ) : (
+                            <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800">
+                              Principal
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-3">
                           <div className="flex justify-end gap-2">
@@ -642,7 +700,7 @@ export function Categories() {
                               type="button"
                               variant="outline"
                             >
-                              <Eye aria-hidden="true" />
+                              <Eye aria-hidden="true" className="text-blue-600" />
                             </Button>
                             <Button
                               aria-label={`Editar ${category.name}`}
@@ -657,65 +715,78 @@ export function Categories() {
                               aria-label={`Eliminar ${category.name}`}
                               disabled={
                                 deletingId === category.id ||
-                                Boolean(category.productCount) ||
-                                Boolean(category.subcategoryCount)
+                                (category.subcategoryCount > 0 &&
+                                  (category.productCount ?? 0) === 0)
                               }
-                              onClick={() => setPendingDeleteId(category.id)}
+                              onClick={() => {
+                                setExpandedId(null);
+                                clearDeleteError();
+                                setPendingDeleteId(category.id);
+                              }}
                               size="icon-sm"
                               type="button"
                               variant="outline"
                             >
-                              <Trash2 aria-hidden="true" />
+                              <Trash2 aria-hidden="true" className="text-destructive" />
                             </Button>
                           </div>
                         </td>
                       </tr>
-                      {expandedId === category.id && (
-                        <tr key={`${category.id}-details`}>
-                          <td
-                            className="bg-muted/40 px-3 py-3 text-xs text-muted-foreground"
-                            colSpan={6}
-                          >
-                            {category.parent
-                              ? `Subcategoría de ${category.parent.name}.`
-                              : category.children?.length
-                                ? `Subcategorías: ${category.children
-                                    .map((child) => child.name)
-                                    .join(", ")}.`
-                                : "Categoría principal sin subcategorías."}
-                            {category.productCount
-                              ? ` Productos asociados: ${category.productCount}.`
-                              : ""}
-                          </td>
-                        </tr>
-                      )}
-                      {pendingDeleteId === category.id && (
-                        <tr key={`${category.id}-confirm`}>
-                          <td className="px-3 py-3 text-sm" colSpan={6}>
-                            <div className="flex flex-wrap items-center justify-end gap-2">
-                              <span className="mr-auto">
-                                ¿Eliminar “{category.name}”?
-                              </span>
-                              <Button
-                                disabled={deletingId === category.id}
-                                onClick={() => void confirmDelete(category)}
-                                size="sm"
-                                type="button"
-                                variant="destructive"
-                              >
-                                {deletingId === category.id
-                                  ? "Eliminando…"
-                                  : "Confirmar"}
-                              </Button>
-                              <Button
-                                disabled={deletingId === category.id}
-                                onClick={() => setPendingDeleteId(null)}
-                                size="sm"
-                                type="button"
-                                variant="outline"
-                              >
-                                Cancelar
-                              </Button>
+                      {(expandedId === category.id ||
+                        pendingDeleteId === category.id ||
+                        deleteError?.categoryId === category.id) && (
+                        <tr className="border-b border-border" key={`${category.id}-panel`}>
+                          <td className="px-3 py-3" colSpan={5}>
+                            <div className="rounded-md border-l-2 border-primary bg-muted/40 px-3 py-3 sm:px-4">
+                              <p className="mb-2 text-xs font-semibold">
+                                {category.parentId ? "Subcategoría" : "Categoría"}: {category.name}
+                              </p>
+                              {expandedId === category.id && (
+                                <p className="text-xs text-muted-foreground">
+                                  {category.parent
+                                    ? `Subcategoría de ${category.parent.name}.`
+                                    : category.children?.length
+                                      ? `Subcategorías: ${category.children
+                                          .map((child) => child.name)
+                                          .join(", ")}.`
+                                      : "Categoría principal sin subcategorías."}
+                                  {category.productCount
+                                    ? ` Productos asociados: ${category.productCount}.`
+                                    : ""}
+                                </p>
+                              )}
+                              {pendingDeleteId === category.id && (
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="mr-auto text-sm">
+                                    ¿Eliminar “{category.name}”?
+                                  </span>
+                                  <Button
+                                    disabled={deletingId === category.id}
+                                    onClick={() => void confirmDelete(category)}
+                                    size="sm"
+                                    type="button"
+                                    variant="destructive"
+                                  >
+                                    {deletingId === category.id
+                                      ? "Eliminando…"
+                                      : "Confirmar"}
+                                  </Button>
+                                  <Button
+                                    disabled={deletingId === category.id}
+                                    onClick={() => setPendingDeleteId(null)}
+                                    size="sm"
+                                    type="button"
+                                    variant="outline"
+                                  >
+                                    Cancelar
+                                  </Button>
+                                </div>
+                              )}
+                              {deleteError?.categoryId === category.id && (
+                                <p className="text-sm text-destructive" role="alert">
+                                  {deleteError.message}
+                                </p>
+                              )}
                             </div>
                           </td>
                         </tr>

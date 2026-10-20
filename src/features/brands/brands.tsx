@@ -296,7 +296,7 @@ export function Brands() {
                                 type="button"
                                 variant="outline"
                               >
-                                <Trash2 aria-hidden="true" />
+                                <Trash2 aria-hidden="true" className="text-destructive" />
                               </Button>
                             </div>
                           )}

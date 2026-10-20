@@ -118,8 +118,11 @@ function InventoryCard({
         <p className="mt-1 text-[11px] text-muted-foreground">
           Productos en inventario
         </p>
-        <p className="mt-1 text-[11px]">
-          Valor: {summary ? formatCurrency(summary.value) : "—"}
+        <p className="mt-1 text-xs font-bold">
+          Valor:{" "}
+          <span className="text-sm font-semibold text-green-700">
+            {summary ? formatCurrency(summary.value) : "—"}
+          </span>
         </p>
         <ul className="mt-3 space-y-2">
           {summary?.products.map((product) => (
@@ -178,7 +181,6 @@ function RecentSalesCard({
           </p>
         ) : orders?.length ? (
           orders.map((sale) => {
-            const confirmed = sale.status !== "CANCELLED" && sale.paymentStatus === "PAID";
             return (
               <article
                 key={sale.orderNumber}
@@ -199,9 +201,7 @@ function RecentSalesCard({
                 </div>
                 <div className="shrink-0 text-right">
                   <p
-                    className={`text-[10px] font-semibold ${
-                      confirmed ? "text-green-700" : "text-muted-foreground"
-                    }`}
+                    className="text-xs font-semibold text-green-700"
                   >
                     {formatCurrency(sale.total)}
                   </p>
@@ -216,6 +216,61 @@ function RecentSalesCard({
           <p className="py-6 text-center text-[10px] text-muted-foreground">
             No hay órdenes recientes para mostrar.
           </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function LowStockAlertsCard({
+  products,
+  loading,
+}: {
+  products: DashboardSummary["lowStockProducts"] | null;
+  loading: boolean;
+}) {
+  return (
+    <Card className="rounded-lg ring-1 ring-foreground/10">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-semibold">Alertas de bajo stock</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <p className="py-5 text-center text-xs text-muted-foreground">
+            Cargando alertas…
+          </p>
+        ) : products === null ? (
+          <p className="py-5 text-center text-xs text-muted-foreground">
+            No se pudieron cargar las alertas de stock.
+          </p>
+        ) : products.length === 0 ? (
+          <p className="py-5 text-center text-xs text-muted-foreground">
+            No hay alertas de bajo stock.
+          </p>
+        ) : (
+          <ul className="grid max-h-64 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 lg:grid-cols-3">
+            {products.map((product) => {
+              const critical = product.stock <= 4;
+              return (
+                <li
+                  key={product.id}
+                  className={`flex min-w-0 items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm ${
+                    critical
+                      ? "border-rose-200 bg-rose-50 text-rose-800"
+                      : "border-amber-200 bg-amber-50 text-amber-800"
+                  }`}
+                >
+                  <span className="min-w-0 truncate font-medium" title={product.name}>
+                    {product.name}
+                  </span>
+                  <span className="shrink-0 text-xs font-semibold">
+                    {product.stock} {product.stock === 1 ? "unidad" : "unidades"} ·{" "}
+                    {critical ? "Crítico" : "Bajo"}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </CardContent>
     </Card>
@@ -363,6 +418,12 @@ export function Dashboard() {
         />
         <RecentSalesCard orders={summary?.recentOrders ?? null} loading={loading} />
         <BestSellingProductsCard products={summary?.topProducts ?? null} loading={loading} />
+      </div>
+      <div className="mt-3">
+        <LowStockAlertsCard
+          products={summary?.lowStockProducts ?? null}
+          loading={loading}
+        />
       </div>
       {createProductOpen && (
         <div

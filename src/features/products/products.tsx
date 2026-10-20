@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -13,6 +13,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ProductForm, ProductImage } from "./product-form";
 import {
@@ -29,8 +30,13 @@ import {
   type ProductList,
 } from "@/lib/api";
 
-type ProductSortColumn = "category" | "brand" | "stock" | "price" | "status";
+type ProductSortColumn = "category" | "brand" | "stock" | "status";
 type SortDirection = "asc" | "desc";
+
+type ProductDeleteError = {
+  productId: string;
+  message: string;
+};
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
@@ -42,14 +48,6 @@ function getErrorMessage(error: unknown): string {
     }
   }
   return "No se pudo completar la operación. Comprueba la conexión e inténtalo nuevamente.";
-}
-
-function formatPrice(price: string): string {
-  return new Intl.NumberFormat("es-AR", {
-    style: "currency",
-    currency: "ARS",
-    minimumFractionDigits: 2,
-  }).format(Number(price));
 }
 
 const EMPTY_LIST: ProductList = {
@@ -70,6 +68,7 @@ export function Products() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [productDeleteError, setProductDeleteError] = useState<ProductDeleteError | null>(null);
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [filterCategoryId, setFilterCategoryId] = useState("");
@@ -158,6 +157,7 @@ export function Products() {
   }
 
   function startEditing(product: Product) {
+    setProductDeleteError(null);
     setIsFormOpen(true);
     setEditingProduct(product);
     setNotice("");
@@ -198,7 +198,7 @@ export function Products() {
               : "descending"
             : "none"
         }
-        className="px-3 py-2 font-medium"
+        className="px-2 py-2 font-medium sm:px-3"
       >
         <button
           aria-label={`Ordenar por ${label}${
@@ -229,6 +229,7 @@ export function Products() {
   }
 
   async function toggleActive(product: Product) {
+    setProductDeleteError(null);
     setError("");
     setNotice("");
     setBusyProductId(product.id);
@@ -248,6 +249,7 @@ export function Products() {
   }
 
   async function confirmDelete(product: Product) {
+    setProductDeleteError(null);
     setError("");
     setNotice("");
     setBusyProductId(product.id);
@@ -259,7 +261,19 @@ export function Products() {
       setNotice("Producto eliminado.");
       setRefreshKey((current) => current + 1);
     } catch (requestError) {
-      setError(getErrorMessage(requestError));
+      if (
+        requestError instanceof ApiError &&
+        requestError.status === 409 &&
+        /orden.*en preparación/i.test(requestError.message)
+      ) {
+        setProductDeleteError({
+          productId: product.id,
+          message:
+            "No se puede eliminar este producto porque está asociado a una orden en preparación. Usa la opción «Desactivar».",
+        });
+      } else {
+        setError(getErrorMessage(requestError));
+      }
     } finally {
       setBusyProductId(null);
     }
@@ -282,7 +296,7 @@ export function Products() {
   );
 
   return (
-    <section aria-labelledby="products-title" className="space-y-5">
+    <section aria-labelledby="products-title" className="min-w-0 max-w-full space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1
@@ -317,7 +331,7 @@ export function Products() {
         </p>
       )}
 
-      <Card className="rounded-lg">
+      <Card className="min-w-0 max-w-full rounded-lg">
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -355,7 +369,7 @@ export function Products() {
             </form>
           </div>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="min-w-0 max-w-full space-y-4">
           <div className="flex flex-wrap items-end gap-3">
             <div className="min-w-44 flex-1 space-y-1.5">
               <label className="text-xs font-medium" htmlFor="filter-category">
@@ -463,134 +477,161 @@ export function Products() {
                 : "No hay productos en esta página."}
             </p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[1000px] text-left text-sm">
+            <div
+              aria-label="Tabla de productos"
+              className="w-full min-w-0 max-w-full overflow-x-auto overscroll-x-contain"
+              tabIndex={0}
+            >
+              <table className="w-full min-w-[900px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-border text-xs text-muted-foreground">
-                    <th className="px-3 py-2 font-medium">Producto</th>
+                    <th className="px-2 py-2 font-medium sm:px-3">Producto</th>
                     {renderSortHeader("Categoría", "category")}
                     {renderSortHeader("Marca", "brand")}
                     {renderSortHeader("Stock total", "stock")}
-                    {renderSortHeader("Precio", "price")}
                     {renderSortHeader("Estado", "status")}
-                    <th className="px-3 py-2 text-right font-medium">Acciones</th>
+                    <th className="px-2 py-2 text-right font-medium sm:px-3">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
                   {productList.items.map((product) => (
-                    <tr
-                      key={product.id}
-                      className="border-b border-border last:border-0"
-                    >
-                      <td className="px-3 py-3">
-                        <div className="flex items-center gap-3">
-                          <ProductImage
-                            alt=""
-                            className="size-12 shrink-0 rounded-md border border-border object-cover"
-                            src={getProductImageUrl(product.imageUrl)}
-                          />
-                          <div className="min-w-0">
-                            <p className="font-medium">{product.name}</p>
-                            <p className="mt-0.5 max-w-xs truncate text-xs text-muted-foreground">
-                              {product.description || "Sin descripción"}
-                            </p>
+                    <Fragment key={product.id}>
+                      <tr className="border-b border-border last:border-0">
+                        <td className="px-2 py-3 sm:px-3">
+                          <div className="flex items-center gap-3">
+                            <ProductImage
+                              alt=""
+                              className="size-12 shrink-0 rounded-md border border-border object-cover"
+                              src={getProductImageUrl(product.imageUrl)}
+                            />
+                            <div className="min-w-0">
+                              <p className="font-medium">{product.name}</p>
+                              <p className="mt-0.5 max-w-xs truncate text-xs text-muted-foreground">
+                                {product.description || "Sin descripción"}
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                      <td className="px-3 py-3">
-                        <div>{product.category.name}</div>
-                        {product.subcategory && (
-                          <div className="text-xs text-muted-foreground">
-                            {product.subcategory.name}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-3 py-3">{product.brand.name}</td>
-                      <td className="px-3 py-3">{product.stock}</td>
-                      <td className="px-3 py-3">{formatPrice(product.price)}</td>
-                      <td className="px-3 py-3">
-                        <span
-                          className={
-                            product.isActive
-                              ? "text-xs font-medium text-foreground"
-                              : "text-xs text-muted-foreground"
-                          }
-                        >
-                          {product.isActive ? "Activo" : "Inactivo"}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3">
-                        {pendingDeleteId === product.id ? (
-                          <div className="flex items-center justify-end gap-2">
-                            <span className="text-xs text-muted-foreground">
-                              ¿Eliminar producto?
-                            </span>
-                            <Button
-                              disabled={busyProductId === product.id}
-                              onClick={() => void confirmDelete(product)}
-                              size="sm"
-                              type="button"
-                              variant="destructive"
-                            >
-                              {busyProductId === product.id
-                                ? "Eliminando…"
-                                : "Confirmar"}
-                            </Button>
-                            <Button
-                              disabled={busyProductId === product.id}
-                              onClick={() => setPendingDeleteId(null)}
-                              size="sm"
-                              type="button"
-                              variant="outline"
-                            >
-                              Cancelar
-                            </Button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center justify-end gap-2">
-                            <Button
-                              aria-label={`Editar ${product.name}`}
-                              disabled={busyProductId === product.id}
-                              onClick={() => startEditing(product)}
-                              size="icon-sm"
-                              type="button"
-                              variant="outline"
-                            >
-                              <Pencil aria-hidden="true" />
-                            </Button>
-                            <Button
-                              disabled={busyProductId === product.id}
-                              onClick={() => void toggleActive(product)}
-                              size="sm"
-                              type="button"
-                              variant="outline"
-                            >
-                              {busyProductId === product.id
-                                ? "Actualizando…"
-                                : product.isActive
-                                  ? "Desactivar"
-                                  : "Activar"}
-                            </Button>
-                            {product.activeSaleItemCount ? (
+                        </td>
+                        <td className="px-2 py-3 sm:px-3">
+                          <div>{product.category.name}</div>
+                          {product.subcategory && (
+                            <div className="text-xs text-muted-foreground">
+                              {product.subcategory.name}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-2 py-3 sm:px-3">{product.brand.name}</td>
+                        <td className="px-2 py-3 sm:px-3">
+                          <Badge
+                            variant="outline"
+                            className={
+                              product.stock > 20
+                                ? "h-auto border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-800"
+                                : product.stock >= 10
+                                  ? "h-auto border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-800"
+                                  : "h-auto border-rose-200 bg-rose-50 px-2.5 py-1 text-rose-800"
+                            }
+                          >
+                            {product.stock} {product.stock === 1 ? "unidad" : "unidades"}
+                          </Badge>
+                        </td>
+                        <td className="px-2 py-3 sm:px-3">
+                          <Badge
+                            variant="outline"
+                            className={
+                              product.isActive
+                                ? "h-auto border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-800"
+                                : "h-auto border-rose-200 bg-rose-50 px-2.5 py-1 text-rose-800"
+                            }
+                          >
+                            {product.isActive ? "Activo" : "Inactivo"}
+                          </Badge>
+                        </td>
+                        <td className="px-2 py-3 sm:px-3">
+                          {pendingDeleteId === product.id ? (
+                            <div className="flex items-center justify-end gap-2">
                               <span className="text-xs text-muted-foreground">
-                                Orden en preparación; usa desactivación
+                                ¿Eliminar producto?
                               </span>
-                            ) : (
                               <Button
-                                aria-label={`Eliminar ${product.name}`}
                                 disabled={busyProductId === product.id}
-                                onClick={() => setPendingDeleteId(product.id)}
+                                onClick={() => void confirmDelete(product)}
+                                size="sm"
+                                type="button"
+                                variant="destructive"
+                              >
+                                {busyProductId === product.id
+                                  ? "Eliminando…"
+                                  : "Confirmar"}
+                              </Button>
+                              <Button
+                                disabled={busyProductId === product.id}
+                                onClick={() => {
+                                  setPendingDeleteId(null);
+                                  setProductDeleteError(null);
+                                }}
+                                size="sm"
+                                type="button"
+                                variant="outline"
+                              >
+                                Cancelar
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                aria-label={`Editar ${product.name}`}
+                                disabled={busyProductId === product.id}
+                                onClick={() => startEditing(product)}
                                 size="icon-sm"
                                 type="button"
                                 variant="outline"
                               >
-                                <Trash2 aria-hidden="true" />
+                                <Pencil aria-hidden="true" />
                               </Button>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
+                              <Button
+                                disabled={busyProductId === product.id}
+                                onClick={() => void toggleActive(product)}
+                                size="sm"
+                                type="button"
+                                variant="outline"
+                              >
+                                {busyProductId === product.id
+                                  ? "Actualizando…"
+                                  : product.isActive
+                                    ? "Desactivar"
+                                    : "Activar"}
+                              </Button>
+                              <Button
+                                aria-label={`Eliminar ${product.name}`}
+                                disabled={busyProductId === product.id}
+                                onClick={() => {
+                                  setProductDeleteError(null);
+                                  setPendingDeleteId(product.id);
+                                }}
+                                size="icon-sm"
+                                type="button"
+                                variant="outline"
+                              >
+                                <Trash2 aria-hidden="true" className="text-destructive" />
+                              </Button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                      {productDeleteError?.productId === product.id && (
+                        <tr>
+                          <td className="px-2 pb-3 sm:px-3" colSpan={6}>
+                            <p
+                              role="alert"
+                              className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+                            >
+                              {productDeleteError.message}
+                            </p>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>

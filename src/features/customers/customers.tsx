@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -107,7 +107,6 @@ export function Customers() {
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [expandedCustomer, setExpandedCustomer] = useState<Customer | null>(
     null,
   );
@@ -120,6 +119,8 @@ export function Customers() {
   const [form, setForm] = useState<CustomerFormValues>(EMPTY_FORM);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const detailsDialogRef = useRef<HTMLDivElement>(null);
+  const detailsTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -152,6 +153,42 @@ export function Customers() {
       active = false;
     };
   }, [appliedSearch, page, refreshKey, sortColumn, sortDirection]);
+
+  useEffect(() => {
+    if (!expandedCustomer) return;
+    const dialog = detailsDialogRef.current;
+    dialog?.querySelector<HTMLElement>("button:not(:disabled)")?.focus();
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setExpandedCustomer(null);
+        return;
+      }
+      if (event.key !== "Tab" || !dialog) return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          "a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])",
+        ),
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      detailsTriggerRef.current?.focus();
+      detailsTriggerRef.current = null;
+    };
+  }, [expandedCustomer]);
 
   function resetForm() {
     setEditingCustomer(null);
@@ -253,15 +290,9 @@ export function Customers() {
   }
 
   async function toggleDetails(customer: Customer) {
-    if (expandedId === customer.id) {
-      setExpandedId(null);
-      setExpandedCustomer(null);
-      return;
-    }
     setError("");
     try {
       const details = await getCustomer(customer.id);
-      setExpandedId(customer.id);
       setExpandedCustomer(details);
     } catch (requestError) {
       setError(getErrorMessage(requestError));
@@ -537,8 +568,7 @@ export function Customers() {
                 </thead>
                 <tbody>
                   {customerList.items.map((customer) => (
-                    <Fragment key={customer.id}>
-                      <tr className="border-b border-border last:border-0">
+                      <tr key={customer.id} className="border-b border-border last:border-0">
                         <td className="px-3 py-3 font-medium">
                           {customer.firstName} {customer.lastName}
                         </td>
@@ -576,12 +606,15 @@ export function Customers() {
                             <div className="flex justify-end gap-2">
                               <Button
                                 aria-label={`Consultar ${customer.firstName} ${customer.lastName}`}
-                                onClick={() => void toggleDetails(customer)}
+                                onClick={(event) => {
+                                  detailsTriggerRef.current = event.currentTarget;
+                                  void toggleDetails(customer);
+                                }}
                                 size="icon-sm"
                                 type="button"
                                 variant="outline"
                               >
-                                <Eye aria-hidden="true" />
+                                <Eye aria-hidden="true" className="text-blue-600" />
                               </Button>
                               <Button
                                 aria-label={`Editar ${customer.firstName} ${customer.lastName}`}
@@ -599,42 +632,12 @@ export function Customers() {
                                 type="button"
                                 variant="outline"
                               >
-                                <Trash2 aria-hidden="true" />
+                                <Trash2 aria-hidden="true" className="text-destructive" />
                               </Button>
                             </div>
                           )}
                         </td>
                       </tr>
-                      {expandedId === customer.id && expandedCustomer && (
-                        <tr>
-                          <td
-                            className="bg-muted/40 px-3 py-3 text-xs text-muted-foreground"
-                            colSpan={5}
-                          >
-                            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                              <p>
-                                <span className="font-medium text-foreground">
-                                  Dirección:
-                                </span>{" "}
-                                {expandedCustomer.shippingAddress}
-                              </p>
-                              <p>
-                                <span className="font-medium text-foreground">
-                                  Código postal:
-                                </span>{" "}
-                                {expandedCustomer.postalCode}
-                              </p>
-                              <p>
-                                <span className="font-medium text-foreground">
-                                  Registrado:
-                                </span>{" "}
-                                {formatDate(expandedCustomer.createdAt)}
-                              </p>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
                   ))}
                 </tbody>
               </table>
@@ -679,6 +682,61 @@ export function Customers() {
           </div>
         </CardContent>
       </Card>
+      {expandedCustomer && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-3 sm:items-center sm:p-6"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setExpandedCustomer(null);
+            }
+          }}
+        >
+          <div className="my-3 w-full max-w-2xl" ref={detailsDialogRef}>
+            <Card
+              aria-labelledby="customer-details-title"
+              aria-modal="true"
+              role="dialog"
+            >
+              <CardHeader className="border-b">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <CardTitle id="customer-details-title">
+                      {expandedCustomer.firstName} {expandedCustomer.lastName}
+                    </CardTitle>
+                    <CardDescription>Información del cliente</CardDescription>
+                  </div>
+                  <Button
+                    aria-label="Cerrar detalles del cliente"
+                    onClick={() => setExpandedCustomer(null)}
+                    size="icon-sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    <X aria-hidden="true" />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="grid gap-4 py-5 sm:grid-cols-2">
+                {[
+                  ["Email", expandedCustomer.email],
+                  ["Teléfono", expandedCustomer.phone],
+                  ["Dirección de envío", expandedCustomer.shippingAddress],
+                  ["Ciudad", expandedCustomer.city],
+                  ["Código postal", expandedCustomer.postalCode],
+                  ["Registrado", formatDate(expandedCustomer.createdAt)],
+                  ["Última actualización", formatDate(expandedCustomer.updatedAt)],
+                ].map(([label, value]) => (
+                  <div className="min-w-0 rounded-md border p-3" key={label}>
+                    <p className="text-xs font-medium text-muted-foreground">{label}</p>
+                    <p className="mt-1 break-words text-sm">{value}</p>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

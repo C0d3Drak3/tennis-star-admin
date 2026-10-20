@@ -775,7 +775,7 @@ export function Sales() {
                     <td className="px-3 py-3"><span className={`rounded-full px-2 py-1 text-xs font-medium ${sale.paymentStatus === "PAID" ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}>{paymentText(sale.paymentStatus)}</span></td>
                     <td className="px-3 py-3 text-right">
                       <div className="inline-flex gap-1">
-                        <Button aria-label={`Ver ${sale.orderNumber}`} onClick={() => void showDetails(sale)} size="icon-sm" type="button" variant="ghost"><Eye aria-hidden="true" /></Button>
+                        <Button aria-label={`Ver ${sale.orderNumber}`} onClick={() => void showDetails(sale)} size="icon-sm" type="button" variant="ghost"><Eye aria-hidden="true" className="text-blue-600" /></Button>
                         {sale.status !== "SHIPPED" && (
                           <Button aria-label={sale.status === "CANCELLED" ? `Reactivar ${sale.orderNumber}` : `Editar ${sale.orderNumber}`} onClick={() => openEdit(sale, sale.status === "CANCELLED")} size="icon-sm" type="button" variant="ghost">
                             {sale.status === "CANCELLED" ? <PackageCheck aria-hidden="true" /> : <Pencil aria-hidden="true" />}
