@@ -94,6 +94,8 @@ export function ProductForm({
   const [subcategoryId, setSubcategoryId] = useState(editingProduct?.subcategoryId ?? "");
   const [stock, setStock] = useState(editingProduct ? String(editingProduct.stock) : "");
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imageButtonHovered, setImageButtonHovered] = useState(false);
+  const [imageInputFocused, setImageInputFocused] = useState(false);
   const [imagePreview, setImagePreview] = useState(
     editingProduct ? getProductImageUrl(editingProduct.imageUrl) : "",
   );
@@ -364,16 +366,51 @@ export function ProductForm({
             </div>
             <div className="space-y-1.5">
               <label htmlFor="product-image" className="text-sm font-medium">Imagen</label>
-              <input
-                accept={ACCEPTED_IMAGE_TYPES.join(",")}
-                className="block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-2 file:text-sm"
-                disabled={isSaving}
-                id="product-image"
-                onChange={(event) => handleImageChange(event.currentTarget.files?.[0])}
-                ref={fileInputRef}
-                required={!editingProduct}
-                type="file"
-              />
+              <div className="flex flex-wrap items-center gap-3">
+                <input
+                  accept={ACCEPTED_IMAGE_TYPES.join(",")}
+                  aria-label="Seleccionar archivo de imagen"
+                  disabled={isSaving}
+                  id="product-image"
+                  onChange={(event) => handleImageChange(event.currentTarget.files?.[0])}
+                  onBlur={() => setImageInputFocused(false)}
+                  onFocus={() => setImageInputFocused(true)}
+                  ref={fileInputRef}
+                  required={!editingProduct}
+                  style={{
+                    position: "absolute",
+                    width: "1px",
+                    height: "1px",
+                    padding: 0,
+                    margin: "-1px",
+                    overflow: "hidden",
+                    clip: "rect(0, 0, 0, 0)",
+                    whiteSpace: "nowrap",
+                    border: 0,
+                  }}
+                  type="file"
+                />
+                <label
+                  className="product-image-button"
+                  htmlFor="product-image"
+                  onMouseEnter={() => setImageButtonHovered(true)}
+                  onMouseLeave={() => setImageButtonHovered(false)}
+                  style={{
+                    backgroundColor: imageButtonHovered ? "#D4D4D4" : "#E5E5E5",
+                    border: `1px solid ${imageButtonHovered ? "#8A8A8A" : "#B8B8B8"}`,
+                    borderRadius: "var(--radius-md)",
+                    color: "#171717",
+                    outline: imageInputFocused ? "2px solid var(--ring)" : "none",
+                    outlineOffset: imageInputFocused ? "2px" : "0",
+                    transition: "background-color 150ms ease, border-color 150ms ease",
+                  }}
+                >
+                  Seleccionar archivo
+                </label>
+                <span className="min-w-0 break-all text-sm text-muted-foreground">
+                  {imageFile?.name ?? "Ningún archivo seleccionado"}
+                </span>
+              </div>
               <p className="text-xs text-muted-foreground">JPEG, PNG, GIF o WebP; máximo 5 MB.</p>
             </div>
             {imagePreview && (

@@ -163,11 +163,11 @@ export function AdminHeader() {
   }
 
   return (
-    <header className="flex min-h-14 items-center justify-between gap-3 border-b border-border px-4 sm:px-6">
-      <div className="flex min-w-0 items-center gap-3 text-xs sm:gap-5">
+    <header className="flex min-h-14 items-center justify-between gap-3 border-b border-white/15 bg-[#292929] px-4 text-white sm:px-6">
+      <div className="flex min-w-0 items-center gap-3 text-xs text-white sm:gap-5">
         <Button
           aria-label="Volver a la página anterior"
-          className="shrink-0"
+          className="shrink-0 text-white hover:bg-white/10 hover:text-white"
           disabled={isNavigatingBack}
           onClick={handleBack}
           size="icon-sm"
@@ -180,23 +180,23 @@ export function AdminHeader() {
           <span>Inicio</span>
           {breadcrumbs.map((label, index) => (
             <span key={`${label}-${index}`}>
-              <span aria-hidden="true" className="mx-2 text-muted-foreground">/</span>
+              <span aria-hidden="true" className="mx-2 text-white/60">/</span>
               <span>{label}</span>
             </span>
           ))}
         </nav>
       </div>
-      <div className="flex items-center gap-3 text-muted-foreground">
+      <div className="flex items-center gap-3 text-white/80">
         <Bell aria-label="Notificaciones" className="size-3.5" />
         <Sun aria-label="Apariencia" className="size-3.5" />
         <span
           aria-label="Perfil de usuario"
-          className="flex size-6 items-center justify-center rounded-full bg-secondary text-foreground"
+          className="flex size-6 items-center justify-center rounded-full bg-white/15 text-white"
         >
           <UserRound aria-hidden="true" className="size-3.5" />
         </span>
         <Button
-          className="text-foreground"
+          className="border-white/30 bg-transparent text-white transition-colors hover:bg-white/10 hover:text-red-400 focus-visible:ring-2 focus-visible:ring-white/70"
           disabled={isLoggingOut}
           onClick={handleLogout}
           size="sm"

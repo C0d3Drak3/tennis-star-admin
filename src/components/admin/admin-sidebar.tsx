@@ -42,7 +42,10 @@ export function AdminSidebar({
 }) {
   const pathname = usePathname();
   return (
-    <aside className="border-b border-border bg-background md:min-h-screen md:w-56 md:shrink-0 md:border-b-0 md:border-r">
+    <aside
+      className="admin-sidebar border-b border-border md:min-h-screen md:w-56 md:shrink-0 md:border-b-0 md:border-r"
+      style={{ backgroundColor: "#F0F0F0" }}
+    >
       <div className="flex h-14 items-center border-b border-border px-5">
         <span className="text-sm font-semibold tracking-tight">Tennis Star</span>
       </div>
@@ -74,7 +77,7 @@ export function AdminSidebar({
                 key={label}
                 className={`flex shrink-0 items-center gap-2.5 rounded-md px-2.5 py-2 text-xs ${
                   isCurrentPage
-                    ? "bg-secondary font-bold text-foreground"
+                    ? "bg-[#D4D4D4] font-bold text-foreground"
                     : "text-muted-foreground"
                 }`}
               >
