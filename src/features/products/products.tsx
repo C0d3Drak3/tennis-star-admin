@@ -1,30 +1,22 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
-  Check,
   ChevronLeft,
   ChevronRight,
   Pencil,
   Plus,
   Search,
   Trash2,
-  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ProductForm, ProductImage } from "./product-form";
 import {
   ApiError,
-  createProduct,
   deleteProduct,
   getBrands,
   getCategories,
@@ -34,25 +26,11 @@ import {
   type Brand,
   type Category,
   type Product,
-  type ProductInput,
   type ProductList,
 } from "@/lib/api";
 
-const MAX_PRODUCT_NAME_LENGTH = 200;
-const MAX_DESCRIPTION_LENGTH = 2_000;
-const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
-const PRICE_PATTERN = /^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/;
-const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 type ProductSortColumn = "category" | "brand" | "stock" | "price" | "status";
 type SortDirection = "asc" | "desc";
-
-function isPositivePrice(value: string): boolean {
-  if (!PRICE_PATTERN.test(value)) {
-    return false;
-  }
-  const [whole, fraction = ""] = value.split(".");
-  return Number(whole) > 0 || /[1-9]/.test(fraction);
-}
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
@@ -74,20 +52,6 @@ function formatPrice(price: string): string {
   }).format(Number(price));
 }
 
-function ProductImage({
-  src,
-  alt,
-  className,
-}: {
-  src: string;
-  alt: string;
-  className: string;
-}) {
-  // The source is the configurable API origin, so it cannot use Next's static image allowlist.
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img alt={alt} className={className} src={src} />;
-}
-
 const EMPTY_LIST: ProductList = {
   items: [],
   total: 0,
@@ -100,8 +64,8 @@ export function Products() {
   const [productList, setProductList] = useState<ProductList>(EMPTY_LIST);
   const [categories, setCategories] = useState<Category[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
+  const [referencesLoading, setReferencesLoading] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
   const [busyProductId, setBusyProductId] = useState<string | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -115,31 +79,13 @@ export function Products() {
   const [sortColumn, setSortColumn] = useState<ProductSortColumn>("category");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [refreshKey, setRefreshKey] = useState(0);
-  const [name, setName] = useState("");
-  const [price, setPrice] = useState("");
-  const [description, setDescription] = useState("");
-  const [brandId, setBrandId] = useState("");
-  const [categoryId, setCategoryId] = useState("");
-  const [subcategoryId, setSubcategoryId] = useState("");
-  const [stock, setStock] = useState("");
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const mainCategories = useMemo(
     () => categories.filter((category) => category.parentId === null),
     [categories],
   );
-  const subcategories = useMemo(
-    () =>
-      categories.filter(
-        (category) => category.parentId === categoryId,
-      ),
-    [categories, categoryId],
-  );
-
   useEffect(() => {
     let active = true;
     void Promise.all([getCategories(), getBrands()])
@@ -153,6 +99,9 @@ export function Products() {
         if (active) {
           setError(getErrorMessage(requestError));
         }
+      })
+      .finally(() => {
+        if (active) setReferencesLoading(false);
       });
     return () => {
       active = false;
@@ -203,56 +152,19 @@ export function Products() {
     sortDirection,
   ]);
 
-  useEffect(
-    () => () => {
-      if (imagePreview.startsWith("blob:")) {
-        URL.revokeObjectURL(imagePreview);
-      }
-    },
-    [imagePreview],
-  );
-
-  function resetForm() {
+  function closeForm() {
     setEditingProduct(null);
     setIsFormOpen(false);
-    setName("");
-    setPrice("");
-    setDescription("");
-    setBrandId("");
-    setCategoryId("");
-    setSubcategoryId("");
-    setStock("");
-    setImageFile(null);
-    setImagePreview("");
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-  }
-
-  function closeForm() {
-    resetForm();
-    setError("");
   }
 
   function startEditing(product: Product) {
     setIsFormOpen(true);
     setEditingProduct(product);
-    setName(product.name);
-    setPrice(product.price);
-    setDescription(product.description ?? "");
-    setBrandId(product.brandId);
-    setCategoryId(product.categoryId);
-    setSubcategoryId(product.subcategoryId ?? "");
-    setStock(String(product.stock));
-    setImageFile(null);
-    setImagePreview(getProductImageUrl(product.imageUrl));
-    setError("");
     setNotice("");
   }
 
   function openNewProductForm() {
-    resetForm();
-    setError("");
+    setEditingProduct(null);
     setNotice("");
     setIsFormOpen(true);
   }
@@ -307,125 +219,13 @@ export function Products() {
     );
   }
 
-  function handleImageChange(file: File | undefined) {
+  function handleFormSaved(message: string) {
+    closeForm();
+    setIsLoading(true);
     setError("");
-    if (!file) {
-      setImageFile(null);
-      setImagePreview(
-        editingProduct ? getProductImageUrl(editingProduct.imageUrl) : "",
-      );
-      return;
-    }
-    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
-      setImageFile(null);
-      setImagePreview(
-        editingProduct ? getProductImageUrl(editingProduct.imageUrl) : "",
-      );
-      setError("Usa una imagen JPEG, PNG, GIF o WebP.");
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-      return;
-    }
-    if (file.size > MAX_IMAGE_SIZE) {
-      setImageFile(null);
-      setImagePreview(
-        editingProduct ? getProductImageUrl(editingProduct.imageUrl) : "",
-      );
-      setError("La imagen no puede superar los 5 MB.");
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-      return;
-    }
-    setImageFile(file);
-    setImagePreview(URL.createObjectURL(file));
-  }
-
-  async function handleSave(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setNotice("");
-    const normalizedName = name.trim();
-    const normalizedPrice = price.trim();
-    const parsedStock = /^\d+$/.test(stock.trim()) ? Number(stock) : Number.NaN;
-
-    if (
-      normalizedName.length === 0 ||
-      normalizedName.length > MAX_PRODUCT_NAME_LENGTH
-    ) {
-      setError(
-        `El nombre debe tener entre 1 y ${MAX_PRODUCT_NAME_LENGTH} caracteres.`,
-      );
-      return;
-    }
-    if (!isPositivePrice(normalizedPrice)) {
-      setError("El precio debe ser positivo y tener hasta dos decimales.");
-      return;
-    }
-    if (description.trim().length > MAX_DESCRIPTION_LENGTH) {
-      setError(
-        `La descripción debe tener hasta ${MAX_DESCRIPTION_LENGTH} caracteres.`,
-      );
-      return;
-    }
-    if (!brands.some((brand) => brand.id === brandId)) {
-      setError("Selecciona una marca existente.");
-      return;
-    }
-    if (!mainCategories.some((category) => category.id === categoryId)) {
-      setError("Selecciona una categoría principal existente.");
-      return;
-    }
-    if (
-      subcategoryId &&
-      !subcategories.some((subcategory) => subcategory.id === subcategoryId)
-    ) {
-      setError("Selecciona una subcategoría de la categoría principal elegida.");
-      return;
-    }
-    if (!Number.isSafeInteger(parsedStock) || parsedStock < 0) {
-      setError("El stock debe ser un número entero no negativo.");
-      return;
-    }
-    if (!editingProduct && !imageFile) {
-      setError("Debes cargar una imagen para el producto.");
-      return;
-    }
-
-    const input: ProductInput = {
-      name: normalizedName,
-      price: normalizedPrice,
-      description: description.trim() || null,
-      brandId,
-      categoryId,
-      subcategoryId: subcategoryId || null,
-      stock: parsedStock,
-    };
-
-    setIsSaving(true);
-    try {
-      if (editingProduct) {
-        await updateProduct(
-          editingProduct.id,
-          input,
-          imageFile ?? undefined,
-        );
-        setNotice("Producto actualizado.");
-      } else if (imageFile) {
-        await createProduct(input, imageFile);
-        setNotice("Producto creado.");
-      }
-      resetForm();
-      setIsLoading(true);
-      setError("");
-      setPage(1);
-      setRefreshKey((current) => current + 1);
-    } catch (requestError) {
-      setError(getErrorMessage(requestError));
-    } finally {
-      setIsSaving(false);
-    }
+    setNotice(message);
+    setPage(1);
+    setRefreshKey((current) => current + 1);
   }
 
   async function toggleActive(product: Product) {
@@ -502,245 +302,14 @@ export function Products() {
       </div>
 
       {isFormOpen && (
-      <Card className="rounded-lg">
-        <CardHeader>
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-1.5">
-              <CardTitle>
-                {editingProduct ? "Editar producto" : "Nuevo producto"}
-              </CardTitle>
-              <CardDescription>
-                Los productos vinculados a ventas se conservan en el historial y se
-                pueden desactivar.
-              </CardDescription>
-            </div>
-            <Button
-              aria-label="Cerrar formulario"
-              disabled={isSaving}
-              onClick={closeForm}
-              size="icon-sm"
-              type="button"
-              variant="outline"
-            >
-              <X aria-hidden="true" />
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <form className="space-y-4" onSubmit={handleSave} noValidate>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <div className="space-y-1.5">
-                <label htmlFor="product-name" className="text-sm font-medium">
-                  Nombre
-                </label>
-                <input
-                  autoComplete="off"
-                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-                  disabled={isSaving}
-                  id="product-name"
-                  maxLength={MAX_PRODUCT_NAME_LENGTH}
-                  onChange={(event) => setName(event.target.value)}
-                  required
-                  value={name}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label htmlFor="product-price" className="text-sm font-medium">
-                  Precio (ARS)
-                </label>
-                <input
-                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-                  disabled={isSaving}
-                  id="product-price"
-                  inputMode="decimal"
-                  onChange={(event) => setPrice(event.target.value)}
-                  placeholder="0.00"
-                  required
-                  value={price}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label htmlFor="product-brand" className="text-sm font-medium">
-                  Marca
-                </label>
-                <select
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  disabled={isSaving || brands.length === 0}
-                  id="product-brand"
-                  onChange={(event) => setBrandId(event.target.value)}
-                  required
-                  value={brandId}
-                >
-                  <option value="">Selecciona una marca</option>
-                  {brands.map((brand) => (
-                    <option key={brand.id} value={brand.id}>
-                      {brand.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <label
-                  htmlFor="product-category"
-                  className="text-sm font-medium"
-                >
-                  Categoría principal
-                </label>
-                <select
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  disabled={isSaving || mainCategories.length === 0}
-                  id="product-category"
-                  onChange={(event) => {
-                    setCategoryId(event.target.value);
-                    setSubcategoryId("");
-                  }}
-                  required
-                  value={categoryId}
-                >
-                  <option value="">Selecciona una categoría</option>
-                  {mainCategories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <label
-                  htmlFor="product-subcategory"
-                  className="text-sm font-medium"
-                >
-                  Subcategoría{" "}
-                  <span className="text-muted-foreground">(opcional)</span>
-                </label>
-                <select
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  disabled={isSaving || !categoryId || subcategories.length === 0}
-                  id="product-subcategory"
-                  onChange={(event) => setSubcategoryId(event.target.value)}
-                  value={subcategoryId}
-                >
-                  <option value="">Sin subcategoría</option>
-                  {subcategories.map((subcategory) => (
-                    <option key={subcategory.id} value={subcategory.id}>
-                      {subcategory.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <label htmlFor="product-stock" className="text-sm font-medium">
-                  Stock
-                </label>
-                <input
-                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-                  disabled={isSaving}
-                  id="product-stock"
-                  min={0}
-                  onChange={(event) => setStock(event.target.value)}
-                  required
-                  step={1}
-                  type="number"
-                  value={stock}
-                />
-              </div>
-              <div className="space-y-1.5 sm:col-span-2 lg:col-span-3">
-                <label
-                  htmlFor="product-description"
-                  className="text-sm font-medium"
-                >
-                  Descripción{" "}
-                  <span className="text-muted-foreground">(opcional)</span>
-                </label>
-                <textarea
-                  className="min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
-                  disabled={isSaving}
-                  id="product-description"
-                  maxLength={MAX_DESCRIPTION_LENGTH}
-                  onChange={(event) => setDescription(event.target.value)}
-                  value={description}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label htmlFor="product-image" className="text-sm font-medium">
-                  Imagen
-                </label>
-                <input
-                  accept={ACCEPTED_IMAGE_TYPES.join(",")}
-                  className="block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-2 file:text-sm"
-                  disabled={isSaving}
-                  id="product-image"
-                  onChange={(event) =>
-                    handleImageChange(event.currentTarget.files?.[0])
-                  }
-                  ref={fileInputRef}
-                  required={!editingProduct}
-                  type="file"
-                />
-                <p className="text-xs text-muted-foreground">
-                  JPEG, PNG, GIF o WebP; máximo 5 MB.
-                </p>
-              </div>
-              {imagePreview && (
-                <div className="flex items-end sm:col-span-2">
-                  <ProductImage
-                    alt={`Vista previa de ${name || "producto"}`}
-                    className="size-24 rounded-md border border-border object-cover"
-                    src={imagePreview}
-                  />
-                </div>
-              )}
-            </div>
-            {(brands.length === 0 || mainCategories.length === 0) &&
-              !isLoading && (
-                <p className="text-sm text-muted-foreground">
-                  Crea al menos una marca y una categoría principal antes de
-                  registrar productos.
-                </p>
-              )}
-            <div className="flex gap-2">
-              <Button
-                disabled={
-                  isSaving || brands.length === 0 || mainCategories.length === 0
-                }
-                type="submit"
-              >
-                {editingProduct ? (
-                  <Check aria-hidden="true" data-icon="inline-start" />
-                ) : (
-                  <Plus aria-hidden="true" data-icon="inline-start" />
-                )}
-                {isSaving
-                  ? "Guardando…"
-                  : editingProduct
-                    ? "Guardar cambios"
-                    : "Crear producto"}
-              </Button>
-              <Button
-                disabled={isSaving}
-                onClick={closeForm}
-                type="button"
-                variant="outline"
-              >
-                Cancelar
-              </Button>
-            </div>
-          </form>
-          {error && (
-            <p
-              role="alert"
-              className="mt-4 rounded-md border border-destructive/30 px-3 py-2 text-sm text-destructive"
-            >
-              {error}
-            </p>
-          )}
-          {notice && (
-            <p role="status" className="mt-4 text-sm text-muted-foreground">
-              {notice}
-            </p>
-          )}
-        </CardContent>
-      </Card>
+        <ProductForm
+          brands={brands}
+          categories={categories}
+          referencesLoading={referencesLoading}
+          editingProduct={editingProduct}
+          onClose={closeForm}
+          onSaved={handleFormSaved}
+        />
       )}
       {notice && !isFormOpen && (
         <p role="status" className="text-sm text-muted-foreground">

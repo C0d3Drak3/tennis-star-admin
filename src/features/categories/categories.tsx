@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState, type FormEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -69,6 +69,8 @@ export function Categories() {
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const isSavingRef = useRef(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -92,6 +94,47 @@ export function Categories() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!isFormOpen) return;
+    const dialog = dialogRef.current;
+    const returnFocusTarget = document.activeElement;
+    dialog
+      ?.querySelector<HTMLElement>(
+        "input:not(:disabled), select:not(:disabled), button:not(:disabled)",
+      )
+      ?.focus();
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !isSavingRef.current) {
+        setIsFormOpen(false);
+        setError("");
+        return;
+      }
+      if (event.key !== "Tab" || !dialog) return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          "a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])",
+        ),
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      if (returnFocusTarget instanceof HTMLElement) returnFocusTarget.focus();
+    };
+  }, [isFormOpen]);
 
   const mainCategories = useMemo(
     () =>
@@ -265,6 +308,7 @@ export function Categories() {
     }
 
     setIsSaving(true);
+    isSavingRef.current = true;
     try {
       const input = {
         name: normalizedName,
@@ -292,6 +336,7 @@ export function Categories() {
       setError(getErrorMessage(requestError));
     } finally {
       setIsSaving(false);
+      isSavingRef.current = false;
     }
   }
 
@@ -338,11 +383,29 @@ export function Categories() {
       </div>
 
       {isFormOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-3 sm:p-6"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !isSavingRef.current) {
+              resetForm();
+              setError("");
+              setError("");
+            }
+          }}
+        >
+          <div
+            aria-labelledby="category-form-title"
+            aria-modal="true"
+            className="my-3 w-full max-w-3xl"
+            ref={dialogRef}
+            role="dialog"
+          >
         <Card className="rounded-lg">
           <CardHeader>
             <div className="flex items-start justify-between gap-4">
               <div className="space-y-1.5">
-                <CardTitle>{editingId ? "Editar categoría" : "Nueva categoría"}</CardTitle>
+                <CardTitle id="category-form-title">{editingId ? "Editar categoría" : "Nueva categoría"}</CardTitle>
                 <CardDescription>
                   La jerarquía admite categorías principales y un solo nivel de
                   subcategorías.
@@ -351,7 +414,10 @@ export function Categories() {
               <Button
                 aria-label="Cerrar formulario"
                 disabled={isSaving}
-                onClick={resetForm}
+                onClick={() => {
+                  resetForm();
+                  setError("");
+                }}
                 size="icon-sm"
                 type="button"
                 variant="outline"
@@ -455,7 +521,10 @@ export function Categories() {
                 {editingId && (
                   <Button
                     disabled={isSaving}
-                    onClick={resetForm}
+                    onClick={() => {
+                      resetForm();
+                      setError("");
+                    }}
                     type="button"
                     variant="outline"
                   >
@@ -475,6 +544,8 @@ export function Categories() {
             )}
           </CardContent>
         </Card>
+          </div>
+        </div>
       )}
 
       {!isFormOpen && error && (

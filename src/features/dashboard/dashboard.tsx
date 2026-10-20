@@ -1,95 +1,108 @@
+"use client";
+
+import { useEffect, useRef, useState, type Ref } from "react";
+import Link from "next/link";
 import {
   ArrowUpRight,
   Plus,
   Settings2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-
-const sampleProducts = [
-  { name: "Tenis Adidas VL Court Base - ID3715", quantity: 2 },
-  { name: "Zapatillas Adidas Grand Court Lifestyle", quantity: 2 },
-  { name: "Adidas Tenis Court - GW6456", quantity: 2 },
-  { name: "Adidas VL Court 3.0 - ID9062", quantity: 2 },
-  { name: "Bota Escolar Audaz Niño - 433306", quantity: 2 },
-  { name: "Bota Escolar Audaz Juvenil - 433308", quantity: 2 },
-  { name: "Zapatillas Adidas Casual Tensaur Run 3.0", quantity: 2 },
-  { name: "Botas Jeep 3561 Caballero", quantity: 1 },
-];
-
-const sampleSales = [
-  {
-    customer: "Jaime González Correa",
-    order: "Orden #b1b5e057",
-    status: "Enviado",
-    amount: 99,
-    date: "19 oct · 08:03",
-  },
-  {
-    customer: "Santiago Perez Bagilvo",
-    order: "Orden #05d2cbb",
-    status: "Preparando",
-    amount: 589,
-    date: "18 oct · 17:25",
-  },
-  {
-    customer: "Santiago Perez Bagilvo",
-    order: "Orden #b173300",
-    status: "Cancelado",
-    amount: 1399,
-    date: "17 oct · 16:25",
-  },
-  {
-    customer: "Santiago Perez Bagilvo",
-    order: "Orden #0f30737",
-    status: "Preparando",
-    amount: 1299,
-    date: "17 oct · 09:56",
-  },
-  {
-    customer: "Santiago Perez Bagilvo",
-    order: "Orden #85415e",
-    status: "Cancelado",
-    amount: 1299,
-    date: "17 oct · 08:52",
-  },
-];
+import {
+  ApiError,
+  getDashboardSummary,
+  type DashboardSummary,
+  type SaleOrderStatus,
+} from "@/lib/api";
+import { ProductForm } from "@/features/products/product-form";
 
 const currencyFormatter = new Intl.NumberFormat("es-AR", {
   style: "currency",
   currency: "ARS",
   minimumFractionDigits: 2,
 });
+const integerFormatter = new Intl.NumberFormat("es-AR", {
+  maximumFractionDigits: 0,
+});
+const currencyParts = currencyFormatter.formatToParts(0);
+const integerPartIndex = currencyParts.findIndex((part) => part.type === "integer");
+const decimalSeparator = currencyParts.find((part) => part.type === "decimal")?.value ?? ",";
+const currencyPrefix = currencyParts
+  .slice(0, integerPartIndex)
+  .map((part) => part.value)
+  .join("");
+const currencySuffix = currencyParts
+  .slice(integerPartIndex + 1)
+  .filter((part) => part.type !== "decimal" && part.type !== "fraction")
+  .map((part) => part.value)
+  .join("");
+
+function formatCurrency(value: string): string {
+  const [whole, fraction = ""] = value.split(".");
+  return `${currencyPrefix}${integerFormatter.format(BigInt(whole))}${decimalSeparator}${fraction.padEnd(2, "0").slice(0, 2)}${currencySuffix}`;
+}
+
+function orderStatus(status: SaleOrderStatus): string {
+  return status === "PREPARING"
+    ? "En preparación"
+    : status === "SHIPPED"
+      ? "Enviado"
+      : "Cancelado";
+}
+
+function formattedDate(value: string): string {
+  return new Intl.DateTimeFormat("es-AR", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
 
 function PreviewAction({
   children,
-  icon,
+  onClick,
+  buttonRef,
 }: {
   children: string;
-  icon: "add" | "view";
+  onClick: () => void;
+  buttonRef?: Ref<HTMLButtonElement>;
 }) {
-  const Icon = icon === "add" ? Plus : ArrowUpRight;
-
   return (
     <Button
       type="button"
       size="sm"
-      disabled
-      className="pointer-events-none disabled:opacity-100"
+      onClick={onClick}
+      ref={buttonRef}
     >
-      <Icon data-icon="inline-start" />
+      <Plus data-icon="inline-start" />
       {children}
     </Button>
   );
 }
 
-function InventoryCard() {
+function InventoryCard({
+  summary,
+  loading,
+  onAddProduct,
+  addButtonRef,
+}: {
+  summary: DashboardSummary["inventory"] | null;
+  loading: boolean;
+  onAddProduct: () => void;
+  addButtonRef: Ref<HTMLButtonElement>;
+}) {
+  const remainingProducts = summary
+    ? Math.max(summary.productCount - summary.products.length, 0)
+    : 0;
+
   return (
     <Card className="h-full gap-0 rounded-lg ring-1 ring-foreground/10">
       <CardHeader className="grid-cols-[1fr_auto] items-center gap-2 pb-3">
@@ -99,78 +112,123 @@ function InventoryCard() {
         <Settings2 aria-hidden="true" className="size-3.5 text-muted-foreground" />
       </CardHeader>
       <CardContent className="flex flex-1 flex-col">
-        <p className="text-lg font-semibold leading-none">128</p>
+        <p className="text-lg font-semibold leading-none">
+          {loading ? "Cargando…" : summary?.productCount ?? "—"}
+        </p>
         <p className="mt-1 text-[11px] text-muted-foreground">
           Productos en inventario
         </p>
         <p className="mt-1 text-[11px]">
-          Valor: {currencyFormatter.format(190_192)}
+          Valor: {summary ? formatCurrency(summary.value) : "—"}
         </p>
         <ul className="mt-3 space-y-2">
-          {sampleProducts.map((product) => (
+          {summary?.products.map((product) => (
             <li
-              key={product.name}
+              key={product.id}
               className="flex items-start justify-between gap-3 text-[10px] leading-snug"
             >
               <span className="min-w-0">{product.name}</span>
               <span className="shrink-0 text-muted-foreground">
-                {product.quantity} uds.
+                {product.stock} uds.
               </span>
             </li>
           ))}
         </ul>
-        <p className="mt-2 text-right text-[10px] text-muted-foreground">
-          +68 productos más
-        </p>
+        {!loading && summary && summary.products.length === 0 && (
+          <p className="mt-3 text-[10px] text-muted-foreground">
+            No hay productos con stock disponible.
+          </p>
+        )}
+        {!loading && summary && remainingProducts > 0 && (
+          <p className="mt-2 text-right text-[10px] text-muted-foreground">
+            +{remainingProducts} productos más
+          </p>
+        )}
         <div className="mt-auto flex items-center justify-between pt-3">
-          <PreviewAction icon="add">Añadir</PreviewAction>
-          <PreviewAction icon="view">Ver todos</PreviewAction>
+          <PreviewAction onClick={onAddProduct} buttonRef={addButtonRef}>Añadir</PreviewAction>
+          <Link
+            href="/products"
+            className={buttonVariants({ size: "sm", className: "inline-flex" })}
+          >
+            <ArrowUpRight aria-hidden="true" data-icon="inline-start" />
+            Ver todos
+          </Link>
         </div>
       </CardContent>
     </Card>
   );
 }
 
-function RecentSalesCard() {
+function RecentSalesCard({
+  orders,
+  loading,
+}: {
+  orders: DashboardSummary["recentOrders"] | null;
+  loading: boolean;
+}) {
   return (
     <Card className="h-full gap-0 rounded-lg ring-1 ring-foreground/10">
       <CardHeader className="pb-3">
         <CardTitle className="text-sm font-semibold">Ventas Recientes</CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
-        {sampleSales.map((sale) => (
-          <article
-            key={sale.order}
-            className="flex min-h-[58px] items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
-          >
-            <div className="min-w-0">
-              <p className="truncate text-[10px] font-medium">{sale.customer}</p>
-              <p className="mt-1 truncate text-[9px] text-muted-foreground">
-                {sale.order}
-              </p>
-              <Badge
-                variant="outline"
-                className="mt-1 h-auto border-0 px-0 py-0 text-[9px] font-normal text-muted-foreground"
+        {loading ? (
+          <p className="py-6 text-center text-[10px] text-muted-foreground">
+            Cargando órdenes…
+          </p>
+        ) : orders?.length ? (
+          orders.map((sale) => {
+            const confirmed = sale.status !== "CANCELLED" && sale.paymentStatus === "PAID";
+            return (
+              <article
+                key={sale.orderNumber}
+                className="flex min-h-[58px] items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
               >
-                Estado: {sale.status}
-              </Badge>
-            </div>
-            <div className="shrink-0 text-right">
-              <p className="text-[10px] font-semibold text-green-700">
-                {currencyFormatter.format(sale.amount)}
-              </p>
-              <p className="mt-1 text-[9px] text-muted-foreground">
-                {sale.date}
-              </p>
-            </div>
-          </article>
-        ))}
+                <div className="min-w-0">
+                  <p className="truncate text-[10px] font-medium">{sale.customerName}</p>
+                  <p className="mt-1 truncate text-[9px] text-muted-foreground">
+                    Orden {sale.orderNumber}
+                  </p>
+                  <Badge
+                    variant="outline"
+                    className="mt-1 h-auto border-0 px-0 py-0 text-[9px] font-normal text-muted-foreground"
+                  >
+                    Estado: {orderStatus(sale.status)}
+                    {sale.paymentStatus === "FAILED" ? " · Pago fallido" : ""}
+                  </Badge>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p
+                    className={`text-[10px] font-semibold ${
+                      confirmed ? "text-green-700" : "text-muted-foreground"
+                    }`}
+                  >
+                    {formatCurrency(sale.total)}
+                  </p>
+                  <p className="mt-1 text-[9px] text-muted-foreground">
+                    {formattedDate(sale.createdAt)}
+                  </p>
+                </div>
+              </article>
+            );
+          })
+        ) : (
+          <p className="py-6 text-center text-[10px] text-muted-foreground">
+            No hay órdenes recientes para mostrar.
+          </p>
+        )}
       </CardContent>
     </Card>
   );
 }
 
-function BestSellingProductsCard() {
+function BestSellingProductsCard({
+  products,
+  loading,
+}: {
+  products: DashboardSummary["topProducts"] | null;
+  loading: boolean;
+}) {
   return (
     <Card className="h-full gap-0 rounded-lg ring-1 ring-foreground/10">
       <CardHeader className="pb-3">
@@ -179,30 +237,165 @@ function BestSellingProductsCard() {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="flex min-h-20 items-center justify-center text-center text-[10px] text-muted-foreground">
-          No hay productos top para mostrar.
-        </div>
+        {loading ? (
+          <div className="flex min-h-20 items-center justify-center text-center text-[10px] text-muted-foreground">
+            Cargando productos…
+          </div>
+        ) : products?.length ? (
+          <ul className="space-y-2">
+            {products.map((product) => (
+              <li
+                key={product.name}
+                className="flex items-start justify-between gap-3 text-[10px] leading-snug"
+              >
+                <span className="min-w-0">{product.name}</span>
+                <span className="shrink-0 text-muted-foreground">
+                  {product.quantity} uds.
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="flex min-h-20 items-center justify-center text-center text-[10px] text-muted-foreground">
+            No hay productos vendidos en órdenes confirmadas.
+          </div>
+        )}
       </CardContent>
     </Card>
   );
 }
 
 export function Dashboard() {
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [createProductOpen, setCreateProductOpen] = useState(false);
+  const formSavingRef = useRef(false);
+  const addProductButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    void getDashboardSummary()
+      .then((result) => {
+        if (active) setSummary(result);
+      })
+      .catch((requestError: unknown) => {
+        if (!active) return;
+        setError(
+          requestError instanceof ApiError && requestError.status < 500
+            ? requestError.message
+            : "No se pudo cargar el Dashboard. Comprueba la conexión e inténtalo nuevamente.",
+        );
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [refreshKey]);
+
+  useEffect(() => {
+    if (!createProductOpen) return;
+    const dialog = dialogRef.current;
+    const addProductButton = addProductButtonRef.current;
+    dialog
+      ?.querySelector<HTMLElement>(
+        "input:not(:disabled), select:not(:disabled), button:not(:disabled)",
+      )
+      ?.focus();
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !formSavingRef.current) {
+        setCreateProductOpen(false);
+        return;
+      }
+      if (event.key !== "Tab" || !dialog) return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          "a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])",
+        ),
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      addProductButton?.focus();
+    };
+  }, [createProductOpen]);
+
+  function handleProductCreated() {
+    setCreateProductOpen(false);
+    setLoading(true);
+    setError("");
+    setRefreshKey((current) => current + 1);
+  }
+
   return (
     <section aria-labelledby="dashboard-title">
       <h1 id="dashboard-title" className="sr-only">
         Panel de inicio
       </h1>
-      <div className="mb-4 flex items-center justify-end">
-        <Badge variant="secondary" className="font-normal">
-          Vista previa · datos de muestra
-        </Badge>
-      </div>
+      {error && (
+        <p role="alert" className="mb-4 text-sm text-destructive">
+          {error}
+        </p>
+      )}
       <div className="grid items-start gap-3 lg:grid-cols-3">
-        <InventoryCard />
-        <RecentSalesCard />
-        <BestSellingProductsCard />
+        <InventoryCard
+          summary={summary?.inventory ?? null}
+          loading={loading}
+          onAddProduct={() => setCreateProductOpen(true)}
+          addButtonRef={addProductButtonRef}
+        />
+        <RecentSalesCard orders={summary?.recentOrders ?? null} loading={loading} />
+        <BestSellingProductsCard products={summary?.topProducts ?? null} loading={loading} />
       </div>
+      {createProductOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-3 sm:p-6"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !formSavingRef.current) {
+              setCreateProductOpen(false);
+            }
+          }}
+        >
+          <div
+            aria-labelledby="dashboard-create-product-title"
+            aria-modal="true"
+            className="my-3 w-full max-w-4xl"
+            ref={dialogRef}
+            role="dialog"
+          >
+            <div className="sr-only" id="dashboard-create-product-title">
+              Nuevo producto
+            </div>
+            <ProductForm
+              onClose={() => {
+                if (!formSavingRef.current) setCreateProductOpen(false);
+              }}
+              onSaved={handleProductCreated}
+              onSavingChange={(saving) => {
+                formSavingRef.current = saving;
+              }}
+            />
+          </div>
+        </div>
+      )}
     </section>
   );
 }

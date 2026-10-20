@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { ArrowRight, CircleDot } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -92,13 +93,15 @@ export function LoginForm() {
     <main className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
       <div className="w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center text-center">
-          <span className="mb-3 flex size-10 items-center justify-center rounded-full border border-border">
-            <CircleDot aria-hidden="true" className="size-5" />
-          </span>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-            Tennis Star
-          </p>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight">
+          <Image
+            alt="Tennis Star"
+            className="mb-4 h-auto w-full max-w-[220px] object-contain"
+            height={835}
+            priority
+            src="/Logo%20TenisStar.png"
+            width={1883}
+          />
+          <h1 className="text-2xl font-semibold tracking-tight">
             Iniciar sesión
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">

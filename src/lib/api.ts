@@ -327,12 +327,33 @@ export interface SaleFilters {
   sortDirection?: "asc" | "desc";
 }
 
+export interface DashboardSummary {
+  inventory: {
+    productCount: number;
+    value: string;
+    products: { id: string; name: string; stock: number }[];
+  };
+  recentOrders: {
+    orderNumber: string;
+    customerName: string;
+    status: SaleOrderStatus;
+    paymentStatus: SalePaymentStatus;
+    total: string;
+    createdAt: string;
+  }[];
+  topProducts: { name: string; quantity: number }[];
+}
+
 function queryString(filters: object): string {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) {
     if (value !== undefined && value !== "") query.set(key, String(value));
   }
   return query.size ? `?${query.toString()}` : "";
+}
+
+export function getDashboardSummary(): Promise<DashboardSummary> {
+  return request<DashboardSummary>("/dashboard");
 }
 
 export function getSales(filters: SaleFilters = {}): Promise<SaleList> {
