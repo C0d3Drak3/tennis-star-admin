@@ -1,3 +1,5 @@
+"use client";
+
 import {
   BadgePercent,
   Bell,
@@ -15,6 +17,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 const navigationItems: { label: string; icon: LucideIcon }[] = [
   { label: "Inicio", icon: House },
@@ -33,10 +36,11 @@ const navigationItems: { label: string; icon: LucideIcon }[] = [
 ];
 
 export function AdminSidebar({
-  activeLabel = "Inicio",
+  activeLabel,
 }: {
   activeLabel?: string;
 }) {
+  const pathname = usePathname();
   return (
     <aside className="border-b border-border bg-background md:min-h-screen md:w-56 md:shrink-0 md:border-b-0 md:border-r">
       <div className="flex h-14 items-center border-b border-border px-5">
@@ -45,7 +49,6 @@ export function AdminSidebar({
       <nav aria-label="Navegación principal" className="p-3">
         <ul className="flex gap-1 overflow-x-auto pb-1 md:flex-col md:overflow-visible md:pb-0">
           {navigationItems.map(({ label, icon: Icon }) => {
-            const isCurrentPage = label === activeLabel;
             const href =
               label === "Inicio"
                 ? "/"
@@ -60,13 +63,18 @@ export function AdminSidebar({
                     : label === "Ventas"
                       ? "/sales"
                     : null;
+            const isCurrentPage = href
+              ? href === "/"
+                ? pathname === "/"
+                : pathname === href || pathname.startsWith(`${href}/`)
+              : label === activeLabel;
 
             return (
               <li
                 key={label}
                 className={`flex shrink-0 items-center gap-2.5 rounded-md px-2.5 py-2 text-xs ${
                   isCurrentPage
-                    ? "bg-secondary font-medium text-foreground"
+                    ? "bg-secondary font-bold text-foreground"
                     : "text-muted-foreground"
                 }`}
               >
@@ -74,9 +82,16 @@ export function AdminSidebar({
                   <Link
                     href={href}
                     aria-current={isCurrentPage ? "page" : undefined}
-                    className="flex w-full items-center gap-2.5"
+                    className={`flex w-full items-center gap-2.5 rounded-sm outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring ${
+                      isCurrentPage ? "text-foreground" : ""
+                    }`}
                   >
-                    <Icon aria-hidden="true" className="size-3.5 shrink-0" />
+                    <Icon
+                      aria-hidden="true"
+                      className={`size-3.5 shrink-0 ${
+                        isCurrentPage ? "text-primary" : ""
+                      }`}
+                    />
                     <span>{label}</span>
                   </Link>
                 ) : (

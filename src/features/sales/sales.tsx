@@ -49,6 +49,10 @@ import {
 const PAGE_SIZE = 10;
 type SortColumn = NonNullable<SaleFilters["sortBy"]>;
 type Direction = NonNullable<SaleFilters["sortDirection"]>;
+type SaleFormItem = SaleInput["items"][number] & {
+  historicalProductName?: string;
+};
+type SaleFormState = Omit<SaleInput, "items"> & { items: SaleFormItem[] };
 
 const EMPTY_LIST: SaleList = {
   items: [],
@@ -183,7 +187,7 @@ function saleCustomerName(sale: Sale): string {
     .trim();
 }
 
-function newForm(sale?: Sale): SaleInput {
+function newForm(sale?: Sale): SaleFormState {
   if (!sale) return { ...EMPTY_INPUT, items: [] };
   return {
     customerId: sale.customerId ?? "",
@@ -199,9 +203,10 @@ function newForm(sale?: Sale): SaleInput {
     trackingNumber: sale.trackingNumber ?? "",
     operationalNotes: sale.operationalNotes ?? "",
     items: sale.items.map((item) => ({
-      productId: item.productId ?? "",
+      productId: item.productId ?? item.productIdSnapshot ?? "",
       quantity: item.quantity,
       unitPrice: item.unitPrice,
+      historicalProductName: item.productName,
     })),
   };
 }
@@ -257,8 +262,9 @@ export function Sales() {
   const [refresh, setRefresh] = useState(0);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Sale | null>(null);
+  const [loadingEditId, setLoadingEditId] = useState<string | null>(null);
   const [reactivating, setReactivating] = useState(false);
-  const [form, setForm] = useState<SaleInput>(EMPTY_INPUT);
+  const [form, setForm] = useState<SaleFormState>(EMPTY_INPUT);
   const [idempotencyKey, setIdempotencyKey] = useState("");
   const [selected, setSelected] = useState<Sale | null>(null);
   const [managementNote, setManagementNote] = useState("");
@@ -368,14 +374,22 @@ export function Sales() {
     setFormOpen(true);
   }
 
-  function openEdit(sale: Sale, reactivate = false) {
+  async function openEdit(sale: Sale, reactivate = false) {
     setError("");
     setNotice("");
-    setEditing(sale);
-    setReactivating(reactivate);
-    setForm(newForm(sale));
-    setSelected(null);
-    setFormOpen(true);
+    setLoadingEditId(sale.id);
+    try {
+      const fullSale = await getSale(sale.id);
+      setEditing(fullSale);
+      setReactivating(reactivate);
+      setForm(newForm(fullSale));
+      setSelected(null);
+      setFormOpen(true);
+    } catch (requestError) {
+      setError(errorText(requestError));
+    } finally {
+      setLoadingEditId(null);
+    }
   }
 
   function patchForm(field: keyof SaleInput, value: SaleInput[keyof SaleInput]) {
@@ -393,6 +407,7 @@ export function Sales() {
             ...line,
             productId: value,
             unitPrice: product?.price ?? line.unitPrice ?? "0.00",
+            historicalProductName: undefined,
           };
         }
         if (field === "quantity") return { ...line, quantity: Number(value) };
@@ -677,9 +692,18 @@ export function Sales() {
                         <span>Producto</span>
                         <select className="h-9 w-full rounded-md border border-input bg-background px-2" onChange={(event) => setLine(index, "productId", event.target.value)} value={line.productId}>
                           <option value="">Seleccionar producto</option>
-                          {line.productId && !product && <option value={line.productId}>Producto histórico eliminado — seleccionar reemplazo</option>}
+                          {line.productId && !product && (
+                            <option value={line.productId}>
+                              {line.historicalProductName ?? "Producto histórico"} — no disponible
+                            </option>
+                          )}
                           {products.filter((item) => item.isActive || item.id === line.productId).map((item) => <option key={item.id} value={item.id}>{item.name}{item.isActive ? "" : " (inactivo)"} ({money(item.price)}) · stock {item.stock}</option>)}
                         </select>
+                        {line.productId && !product && (
+                          <span className="block text-xs text-amber-700">
+                            Producto histórico no disponible. Selecciona un producto para reemplazar esta línea.
+                          </span>
+                        )}
                         {product && <span className="block text-xs text-muted-foreground">{product.description ?? "Sin descripción"}</span>}
                       </label>
                       <label className="space-y-1 text-sm">
@@ -777,7 +801,7 @@ export function Sales() {
                       <div className="inline-flex gap-1">
                         <Button aria-label={`Ver ${sale.orderNumber}`} onClick={() => void showDetails(sale)} size="icon-sm" type="button" variant="ghost"><Eye aria-hidden="true" className="text-blue-600" /></Button>
                         {sale.status !== "SHIPPED" && (
-                          <Button aria-label={sale.status === "CANCELLED" ? `Reactivar ${sale.orderNumber}` : `Editar ${sale.orderNumber}`} onClick={() => openEdit(sale, sale.status === "CANCELLED")} size="icon-sm" type="button" variant="ghost">
+                          <Button aria-label={sale.status === "CANCELLED" ? `Reactivar ${sale.orderNumber}` : `Editar ${sale.orderNumber}`} disabled={loadingEditId === sale.id} onClick={() => void openEdit(sale, sale.status === "CANCELLED")} size="icon-sm" type="button" variant="ghost">
                             {sale.status === "CANCELLED" ? <PackageCheck aria-hidden="true" /> : <Pencil aria-hidden="true" />}
                           </Button>
                         )}
@@ -902,7 +926,7 @@ export function Sales() {
                 )}
                 {selected.status === "CANCELLED" && (
                   selected.paymentStatus === "PAID" && (
-                    <Button disabled={saving} onClick={() => openEdit(selected, true)} type="button"><PackageCheck aria-hidden="true" data-icon="inline-start" />Reactivar orden</Button>
+                    <Button disabled={saving || loadingEditId === selected.id} onClick={() => void openEdit(selected, true)} type="button"><PackageCheck aria-hidden="true" data-icon="inline-start" />Reactivar orden</Button>
                   )
                 )}
                 {selected.status === "SHIPPED" && <p className="w-full text-xs text-muted-foreground">Las órdenes enviadas no pueden cancelarse ni editar sus productos, importes o pago.</p>}
