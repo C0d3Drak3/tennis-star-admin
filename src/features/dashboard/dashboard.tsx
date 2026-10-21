@@ -109,7 +109,7 @@ function InventoryCard({
         <CardTitle className="text-xs font-medium">
           Inventario de Productos
         </CardTitle>
-        <Settings2 aria-hidden="true" className="size-3.5 text-muted-foreground" />
+        
       </CardHeader>
       <CardContent className="flex flex-1 flex-col">
         <p className="text-lg font-semibold leading-none">

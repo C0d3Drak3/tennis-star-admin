@@ -1,6 +1,12 @@
 "use client";
 
-import { Fragment, useEffect, useState, type FormEvent } from "react";
+import {
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { Pencil, Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,6 +49,13 @@ export function Brands() {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const deleteErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const [deleteError, setDeleteError] = useState<{
+    brandId: string;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -66,6 +79,23 @@ export function Brands() {
       active = false;
     };
   }, []);
+
+  useEffect(
+    () => () => {
+      if (deleteErrorTimerRef.current) {
+        clearTimeout(deleteErrorTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  function clearDeleteError() {
+    if (deleteErrorTimerRef.current) {
+      clearTimeout(deleteErrorTimerRef.current);
+      deleteErrorTimerRef.current = null;
+    }
+    setDeleteError(null);
+  }
 
   function resetForm() {
     setEditingId(null);
@@ -120,6 +150,7 @@ export function Brands() {
   async function confirmDelete(brand: Brand) {
     setError("");
     setNotice("");
+    clearDeleteError();
     setBusyId(brand.id);
     try {
       await deleteBrand(brand.id);
@@ -127,7 +158,27 @@ export function Brands() {
       setPendingDeleteId(null);
       setNotice("Marca eliminada.");
     } catch (requestError) {
-      setError(getErrorMessage(requestError));
+      setPendingDeleteId(null);
+      const message = getErrorMessage(requestError);
+      const hasAssociatedProducts =
+        (brand.productCount ?? 0) > 0 || /productos/i.test(message);
+      if (
+        hasAssociatedProducts &&
+        requestError instanceof ApiError &&
+        requestError.status === 409
+      ) {
+        setDeleteError({
+          brandId: brand.id,
+          message:
+            "No se puede eliminar la marca porque tiene productos asociados. Primero reasígnalos o elimínalos.",
+        });
+        deleteErrorTimerRef.current = setTimeout(() => {
+          setDeleteError(null);
+          deleteErrorTimerRef.current = null;
+        }, 10_000);
+      } else {
+        setError(message);
+      }
     } finally {
       setBusyId(null);
     }
@@ -287,11 +338,11 @@ export function Brands() {
                               </Button>
                               <Button
                                 aria-label={`Eliminar ${brand.name}`}
-                                disabled={
-                                  busyId === brand.id ||
-                                  Boolean(brand.productCount)
-                                }
-                                onClick={() => setPendingDeleteId(brand.id)}
+                                disabled={busyId === brand.id}
+                                onClick={() => {
+                                  clearDeleteError();
+                                  setPendingDeleteId(brand.id);
+                                }}
                                 size="icon-sm"
                                 type="button"
                                 variant="outline"
@@ -302,6 +353,17 @@ export function Brands() {
                           )}
                         </td>
                       </tr>
+                      {deleteError?.brandId === brand.id && (
+                        <tr className="border-b border-border" key={`${brand.id}-delete-error`}>
+                          <td className="px-3 py-3" colSpan={3}>
+                            <div className="rounded-md border-l-2 border-destructive bg-muted/40 px-3 py-3 sm:px-4">
+                              <p className="text-sm text-destructive" role="alert">
+                                {deleteError.message}
+                              </p>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
                     </Fragment>
                   ))}
                 </tbody>
